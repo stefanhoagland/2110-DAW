@@ -98,7 +98,9 @@ function buildTrackHeaders() {
     el.querySelector('.vol').addEventListener('input', (e) => { t.volume = +e.target.value; applyMix(); });
     el.querySelector('.pan').addEventListener('input', (e) => { t.pan = +e.target.value; applyMix(); });
     el.querySelector('.pan').addEventListener('dblclick', (e) => { e.target.value = 0; t.pan = 0; applyMix(); });
-    el.querySelector('.meter').addEventListener('click', () => { t.clip = false; });
+    const resetPeak = () => { t.clip = false; t.hold = 0; };
+    el.querySelector('.meter').addEventListener('click', resetPeak);
+    el.querySelector('.db').addEventListener('click', resetPeak);
     headers.appendChild(el);
     refreshTrack(t);
   }
@@ -435,30 +437,65 @@ function onMeter(peaks) {
   }
 }
 
+const METER_FLOOR = -60; // dB at the left edge of a meter
+const METER_TICKS = [-48, -36, -24, -18, -12, -6, -3, 0];
+
+function toDb(v) {
+  return v > 0 ? 20 * Math.log10(v) : -Infinity;
+}
+
 function dbPos(v) {
-  if (v <= 0) return 0;
-  const db = 20 * Math.log10(v);
-  return Math.min(1, Math.max(0, (db + 60) / 60));
+  const db = toDb(v);
+  return Math.min(1, Math.max(0, (db - METER_FLOOR) / -METER_FLOOR));
+}
+
+function dbText(v) {
+  const db = toDb(v);
+  if (db < METER_FLOOR) return '-∞';
+  return db >= -0.05 ? '0.0' : db.toFixed(1);
 }
 
 function drawMeters() {
+  const dpr = window.devicePixelRatio || 1;
   for (const t of tracks) {
     const c = t.el.querySelector('.meter');
+    const cw = c.clientWidth, ch = c.clientHeight;
+    if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
+      c.width = Math.round(cw * dpr);
+      c.height = Math.round(ch * dpr);
+    }
     const g = c.getContext('2d');
-    const w = c.width, h = c.height;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = cw, h = ch;
     g.fillStyle = '#0c0d10';
     g.fillRect(0, 0, w, h);
     const x = dbPos(t.meter) * w;
     const grad = g.createLinearGradient(0, 0, w, 0);
     grad.addColorStop(0, '#2ed573');
-    grad.addColorStop(0.75, '#2ed573');
-    grad.addColorStop(0.9, '#f5c542');
+    grad.addColorStop(dbPos(10 ** (-12 / 20)), '#2ed573');
+    grad.addColorStop(dbPos(10 ** (-6 / 20)), '#f5c542');
     grad.addColorStop(1, '#ff4757');
     g.fillStyle = grad;
     g.fillRect(0, 0, x, h);
+
+    // dB tick marks
+    for (const db of METER_TICKS) {
+      const tx = Math.round(((db - METER_FLOOR) / -METER_FLOOR) * w) - 1;
+      g.fillStyle = 'rgba(12,13,16,0.85)';
+      g.fillRect(tx, 0, 1, h);
+      g.fillStyle = 'rgba(139,146,163,0.55)';
+      g.fillRect(tx, h - 3, 1, 3);
+    }
+
     const hx = dbPos(t.hold) * w;
     if (hx > 1) { g.fillStyle = '#e6e8ee'; g.fillRect(hx - 1, 0, 2, h); }
-    if (t.clip) { g.fillStyle = '#ff4757'; g.fillRect(w - 6, 0, 6, h); }
+    if (t.clip) { g.fillStyle = '#ff4757'; g.fillRect(w - 5, 0, 5, h); }
+
+    // numeric peak-hold readout
+    const label = t.el.querySelector('.db');
+    const text = dbText(t.hold);
+    if (label.textContent !== text) label.textContent = text;
+    label.classList.toggle('clip', t.clip);
     t.meter *= 0.88; // fall-off
   }
 }

@@ -9,7 +9,7 @@ A browser-based digital audio workstation with three modes:
 ## What works today: 16-channel recorder
 
 - Pick your audio interface and sample rate.
-- 16 tracks with names, record arm, level meters (peak hold and clip light), volume, pan, mute and solo.
+- 16 tracks with names, record arm, level meters with dB tick marks and a peak readout in dBFS (click to reset), clip light, volume, pan, mute and solo.
 - Record all armed tracks at once, sample-aligned, as **24-bit mono WAV files, one per channel**.
 - **Choose save folder** (Chrome or Edge) streams every track straight to disk while recording, so long takes don't fill memory. Without a folder, takes stay in memory and **Download WAVs** saves them.
 - Timeline with waveforms, zoom, click-to-locate and playback of the last take.

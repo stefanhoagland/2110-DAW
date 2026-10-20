@@ -139,8 +139,17 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
 .track-header .mute.on { background: var(--mute); border-color: var(--mute); color: #111; }
 .track-header .solo.on { background: var(--solo); border-color: var(--solo); color: #111; }
 .track-header.no-input .name { opacity: 0.5; }
-.track-header .meter { width: 160px; height: 10px; background: #0c0d10; border-radius: 2px; flex: none; }
-.track-header .vol { width: 80px; }
+.track-header .meter { width: 128px; height: 12px; background: #0c0d10; border-radius: 2px; flex: none; cursor: pointer; }
+.track-header .db {
+  width: 36px;
+  flex: none;
+  text-align: right;
+  font: 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--muted);
+  cursor: pointer;
+}
+.track-header .db.clip { color: var(--rec); font-weight: 700; }
+.track-header .vol { width: 70px; min-width: 0; }
 .track-header .pan { width: 50px; }
 
 .timeline { flex: 1; overflow-x: auto; overflow-y: hidden; position: relative; min-width: 0; }
@@ -150,6 +159,6 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
 @media (max-width: 760px) {
   :root { --header-w: 230px; }
   .topbar { flex-wrap: wrap; gap: 10px; }
-  .track-header .meter { width: 90px; }
+  .track-header .meter { width: 70px; }
   .track-header .pan { display: none; }
 }
