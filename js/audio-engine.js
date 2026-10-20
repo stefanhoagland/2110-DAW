@@ -40,6 +40,7 @@ export class AudioEngine extends EventTarget {
     if (sampleRate) opts.sampleRate = sampleRate;
     this.ctx = new AudioContext(opts);
     await this.ctx.audioWorklet.addModule(new URL('./recorder-worklet.js', import.meta.url));
+    await this.ctx.audioWorklet.addModule(new URL('./plugins-worklet.js', import.meta.url));
 
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {

@@ -3,6 +3,7 @@ import { peaksOf } from './wav.js';
 import { DiskWriter, MemoryWriter, canUseFolders, pickFolder, downloadBlob, safeName } from './storage.js';
 import { namesFromCsv, namesToCsv } from './csv.js';
 import { LiveMixer, faderToDb, fmtDb, defaults as stripDefaults } from './live.js';
+import { PLUGINS, PLUGIN_ORDER, formatParam } from './plugins.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
 const ROW_H = 64;
@@ -25,6 +26,7 @@ const state = {
   saving: false, // finishing files after a take
   dirty: true,
   mode: 'studio',
+  editing: null, // { t, k }: plugin open in the editor
 };
 
 const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
@@ -431,16 +433,9 @@ function setMode(mode) {
 
 const KNOB_TEXT = {
   trim: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
-  hi: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
-  mid: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
-  lo: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
-  comp: (v) => (v ? `${Math.round(v * 100)}%` : 'off'),
   pan: (v) => panText(v).replace('center', 'C'),
 };
-const KNOB_TITLE = {
-  trim: 'Input gain (dB)', hi: 'High shelf at 8 kHz (dB)', mid: 'Mid at 1 kHz (dB)',
-  lo: 'Low shelf at 120 Hz (dB)', comp: 'Compression amount', pan: 'Pan',
-};
+const KNOB_TITLE = { trim: 'Input gain (dB)', pan: 'Pan' };
 
 function buildStrips() {
   const tpl = $('strip-template');
@@ -461,8 +456,23 @@ function buildStrips() {
       });
       el.querySelector('.fader-db').textContent = fmtDb(faderToDb(p().fader));
       el.querySelector('.fader').title = `Fader ${fmtDb(faderToDb(p().fader))} dB (double-click for 0 dB)`;
-      ['hpf', 'mute', 'solo'].forEach((k) => el.querySelector(`.${k}`).classList.toggle('on', p()[k]));
+      ['mute', 'solo'].forEach((k) => el.querySelector(`.${k}`).classList.toggle('on', p()[k]));
+      renderInserts(t);
     };
+    const add = el.querySelector('.add-plugin');
+    for (const type of PLUGIN_ORDER) {
+      const o = document.createElement('option');
+      o.value = type;
+      o.textContent = PLUGINS[type].name;
+      add.appendChild(o);
+    }
+    add.addEventListener('change', () => {
+      if (!add.value) return;
+      const k = live.addPlugin(t.index, add.value);
+      add.value = '';
+      renderInserts(t);
+      openPlugin(t, k);
+    });
     el.querySelectorAll('input[data-key]').forEach((inp) => {
       inp.addEventListener('input', () => { live.set(t.index, inp.dataset.key, +inp.value); sync(); });
       inp.addEventListener('dblclick', () => { live.set(t.index, inp.dataset.key, stripDefaults()[inp.dataset.key]); sync(); });
@@ -479,6 +489,92 @@ function buildStrips() {
     consoleEl.appendChild(el);
   }
   refreshStripNames();
+}
+
+function renderInserts(t) {
+  const list = t.strip.querySelector('.insert-list');
+  list.textContent = '';
+  live.params[t.index].plugins.forEach((pl, k) => {
+    const b = document.createElement('button');
+    b.className = 'insert';
+    b.textContent = PLUGINS[pl.type].name;
+    b.title = `${PLUGINS[pl.type].name}${pl.bypass ? ' (bypassed)' : ''}: click to edit`;
+    b.classList.toggle('bypassed', pl.bypass);
+    b.classList.toggle('editing', state.editing && state.editing.t === t && state.editing.k === k);
+    b.addEventListener('click', () => openPlugin(t, k));
+    list.appendChild(b);
+  });
+}
+
+// ---------- plugin editor ----------
+
+function openPlugin(t, k) {
+  const prev = state.editing && state.editing.t;
+  state.editing = { t, k };
+  if (prev && prev !== t) renderInserts(prev);
+  renderInserts(t);
+  const pl = live.params[t.index].plugins[k];
+  const def = PLUGINS[pl.type];
+  $('pp-title').textContent = `${def.name} · ${t.index + 1} ${t.name}`;
+  const box = $('pp-params');
+  box.textContent = '';
+  for (const p of def.params) {
+    const row = document.createElement('label');
+    row.className = 'pp-param';
+    const name = document.createElement('span');
+    name.textContent = p.label;
+    const inp = document.createElement('input');
+    Object.assign(inp, { type: 'range', min: p.min, max: p.max, step: p.step, value: pl.values[p.key] });
+    const out = document.createElement('output');
+    out.textContent = formatParam(p, pl.values[p.key]);
+    inp.addEventListener('input', () => {
+      live.setPluginParam(t.index, state.editing.k, p.key, +inp.value);
+      out.textContent = formatParam(p, +inp.value);
+    });
+    inp.addEventListener('dblclick', () => {
+      inp.value = p.def;
+      live.setPluginParam(t.index, state.editing.k, p.key, p.def);
+      out.textContent = formatParam(p, p.def);
+    });
+    row.append(name, inp, out);
+    box.appendChild(row);
+  }
+  $('pp-bypass').classList.toggle('on', pl.bypass);
+  $('pp-bypass').textContent = pl.bypass ? 'Bypassed' : 'Bypass';
+  $('pp-up').disabled = k === 0;
+  $('pp-down').disabled = k === live.params[t.index].plugins.length - 1;
+  $('plugin-panel').hidden = false;
+}
+
+function closePlugin() {
+  const t = state.editing && state.editing.t;
+  state.editing = null;
+  $('plugin-panel').hidden = true;
+  if (t) renderInserts(t);
+}
+
+function bindPluginPanel() {
+  $('pp-close').addEventListener('click', closePlugin);
+  $('pp-bypass').addEventListener('click', () => {
+    const { t, k } = state.editing;
+    live.setBypass(t.index, k, !live.params[t.index].plugins[k].bypass);
+    openPlugin(t, k);
+  });
+  $('pp-up').addEventListener('click', () => { const { t, k } = state.editing; openPlugin(t, live.movePlugin(t.index, k, -1)); });
+  $('pp-down').addEventListener('click', () => { const { t, k } = state.editing; openPlugin(t, live.movePlugin(t.index, k, 1)); });
+  $('pp-remove').addEventListener('click', () => {
+    const { t, k } = state.editing;
+    live.removePlugin(t.index, k);
+    closePlugin();
+  });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.editing) closePlugin(); });
+}
+
+function drawPluginMeter() {
+  if (!state.editing) return;
+  const gr = live.pluginMeter(state.editing.t.index, state.editing.k);
+  const text = gr === null ? '' : `Gain reduction ${gr.toFixed(1)} dB`;
+  if ($('pp-gr').textContent !== text) $('pp-gr').textContent = text;
 }
 
 function refreshStripNames() {
@@ -543,6 +639,7 @@ function refreshLiveStatus() {
 }
 
 function drawLiveMeters() {
+  drawPluginMeter();
   const now = performance.now();
   for (const t of tracks) {
     feedMeter(t.live, live.peak(t.index), now);
@@ -929,6 +1026,7 @@ function init() {
   buildStrips();
   bindControls();
   bindLive();
+  bindPluginPanel();
   setMode(loadMode());
   requestAnimationFrame(frame);
 

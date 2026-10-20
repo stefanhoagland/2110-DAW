@@ -1,6 +1,9 @@
 // Live mode: a mixing console for the live inputs, for streaming.
-// Each input channel runs through gain -> high-pass -> 3-band EQ ->
-// compressor -> fader -> pan into a live bus that feeds the master output.
+// Each input channel runs through gain -> its plugin inserts (in order,
+// skipping bypassed ones) -> fader -> pan into a live bus that feeds the
+// master output.
+
+import { PLUGINS, pluginDefaults } from './plugins.js';
 
 const STORE_KEY = 'daw2110.live';
 const FADER_MIN_DB = -60;
@@ -12,8 +15,22 @@ const dbToFader = (db) => (db === -Infinity ? 0 : (db - FADER_MIN_DB) / (FADER_M
 const fmtDb = (db) => (db === -Infinity ? '-∞' : `${db > 0.05 ? '+' : ''}${Math.abs(db) < 0.05 ? '0.0' : db.toFixed(1)}`);
 
 const defaults = () => ({
-  trim: 0, hpf: false, lo: 0, mid: 0, hi: 0, comp: 0, fader: dbToFader(0), pan: 0, mute: false, solo: false,
+  trim: 0, fader: dbToFader(0), pan: 0, mute: false, solo: false, plugins: [],
 });
+
+let nextId = 1;
+const newPlugin = (type, values) => ({ id: nextId++, type, bypass: false, values: { ...pluginDefaults(type), ...values } });
+
+// Settings saved before plugins existed had fixed HPF/EQ/compressor controls.
+function migrate(p) {
+  const plugins = Array.isArray(p.plugins) ? p.plugins.filter((x) => x && PLUGINS[x.type]) : [];
+  if (p.hpf) plugins.push(newPlugin('hpf'));
+  if (p.lo || p.mid || p.hi) plugins.push(newPlugin('eq', { loGain: p.lo || 0, midGain: p.mid || 0, hiGain: p.hi || 0 }));
+  if (p.comp) plugins.push(newPlugin('comp', { threshold: -40 * p.comp, ratio: 1 + 7 * p.comp }));
+  for (const k of ['hpf', 'lo', 'mid', 'hi', 'comp']) delete p[k];
+  p.plugins = plugins.map((x) => ({ ...newPlugin(x.type, x.values), bypass: !!x.bypass }));
+  return p;
+}
 
 export class LiveMixer {
   constructor(engine, tracks, { onChange } = {}) {
@@ -31,7 +48,7 @@ export class LiveMixer {
   load() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-      (saved.strips || []).forEach((p, i) => { if (this.params[i] && p) Object.assign(this.params[i], p); });
+      (saved.strips || []).forEach((p, i) => { if (this.params[i] && p) Object.assign(this.params[i], migrate({ ...p })); });
       if (typeof saved.limiter === 'boolean') this.engine.limiterOn = saved.limiter;
       if (typeof saved.output === 'string') this.engine.sinkId = saved.output;
     } catch (_) { /* storage unavailable */ }
@@ -57,31 +74,18 @@ export class LiveMixer {
     this.bus.connect(master);
     this.chains = this.tracks.map((_, i) => {
       const trim = ctx.createGain();
-      const hpf = ctx.createBiquadFilter();
-      hpf.type = 'highpass';
-      const lo = ctx.createBiquadFilter();
-      lo.type = 'lowshelf';
-      lo.frequency.value = 120;
-      const mid = ctx.createBiquadFilter();
-      mid.type = 'peaking';
-      mid.frequency.value = 1000;
-      mid.Q.value = 0.9;
-      const hi = ctx.createBiquadFilter();
-      hi.type = 'highshelf';
-      hi.frequency.value = 8000;
-      const comp = ctx.createDynamicsCompressor();
-      comp.knee.value = 6;
-      comp.attack.value = 0.005;
-      comp.release.value = 0.15;
       const fader = ctx.createGain();
       const pan = ctx.createStereoPanner();
       const meter = ctx.createAnalyser();
       meter.fftSize = 512;
       split.connect(trim, i);
-      trim.connect(hpf).connect(lo).connect(mid).connect(hi).connect(comp).connect(fader).connect(pan).connect(this.bus);
+      fader.connect(pan).connect(this.bus);
       fader.connect(meter);
-      return { trim, hpf, lo, mid, hi, comp, fader, pan, meter };
+      const chain = { trim, fader, pan, meter, inserts: [] };
+      chain.inserts = this.params[i].plugins.map((pl) => this.instantiate(pl));
+      return chain;
     });
+    this.chains.forEach((_, i) => this.rewire(i));
     this.meterBuf = new Float32Array(512);
     this.params.forEach((_, i) => this.apply(i));
   }
@@ -106,12 +110,6 @@ export class LiveMixer {
     const anySolo = this.params.some((x) => x.solo);
     const audible = !p.mute && (!anySolo || p.solo);
     c.trim.gain.setTargetAtTime(dbToGain(p.trim), t, 0.01);
-    c.hpf.frequency.setTargetAtTime(p.hpf ? 80 : 10, t, 0.01);
-    c.lo.gain.setTargetAtTime(p.lo, t, 0.01);
-    c.mid.gain.setTargetAtTime(p.mid, t, 0.01);
-    c.hi.gain.setTargetAtTime(p.hi, t, 0.01);
-    c.comp.threshold.setTargetAtTime(-40 * p.comp, t, 0.01);
-    c.comp.ratio.setTargetAtTime(1 + 7 * p.comp, t, 0.01);
     c.fader.gain.setTargetAtTime(audible ? dbToGain(faderToDb(p.fader)) : 0, t, 0.01);
     c.pan.pan.setTargetAtTime(p.pan, t, 0.01);
   }
@@ -129,17 +127,80 @@ export class LiveMixer {
     return m;
   }
 
-  // Gain reduction of a channel's compressor, in dB (0 or negative).
-  reduction(i) {
-    const c = this.chains[i];
-    return c ? c.comp.reduction : 0;
+  // ---------- plugin inserts ----------
+
+  instantiate(pl) {
+    const inst = PLUGINS[pl.type].create(this.engine.ctx);
+    for (const [k, v] of Object.entries(pl.values)) inst.set(k, v);
+    return inst;
   }
 
-  reset(i) {
-    this.params[i] = defaults();
-    this.apply(i);
+  // Connect trim -> active inserts -> fader for one channel.
+  rewire(i) {
+    const c = this.chains[i];
+    if (!c) return;
+    c.trim.disconnect();
+    c.inserts.forEach((inst) => inst.output.disconnect());
+    let node = c.trim;
+    this.params[i].plugins.forEach((pl, k) => {
+      if (pl.bypass) return;
+      node.connect(c.inserts[k].input);
+      node = c.inserts[k].output;
+    });
+    node.connect(c.fader);
+  }
+
+  addPlugin(i, type) {
+    const pl = newPlugin(type);
+    this.params[i].plugins.push(pl);
+    if (this.chains[i]) this.chains[i].inserts.push(this.instantiate(pl));
+    this.rewire(i);
+    this.save();
+    return this.params[i].plugins.length - 1;
+  }
+
+  removePlugin(i, k) {
+    this.params[i].plugins.splice(k, 1);
+    const c = this.chains[i];
+    if (c) {
+      const [inst] = c.inserts.splice(k, 1);
+      inst.output.disconnect();
+    }
+    this.rewire(i);
     this.save();
   }
+
+  movePlugin(i, k, dir) {
+    const to = k + dir;
+    const list = this.params[i].plugins;
+    if (to < 0 || to >= list.length) return k;
+    [list[k], list[to]] = [list[to], list[k]];
+    const c = this.chains[i];
+    if (c) [c.inserts[k], c.inserts[to]] = [c.inserts[to], c.inserts[k]];
+    this.rewire(i);
+    this.save();
+    return to;
+  }
+
+  setBypass(i, k, bypass) {
+    this.params[i].plugins[k].bypass = bypass;
+    this.rewire(i);
+    this.save();
+  }
+
+  setPluginParam(i, k, key, value) {
+    this.params[i].plugins[k].values[key] = value;
+    const c = this.chains[i];
+    if (c) c.inserts[k].set(key, value);
+    this.save();
+  }
+
+  // Gain reduction (dB, 0 or below) of a dynamics plugin, if it has one.
+  pluginMeter(i, k) {
+    const inst = this.chains[i] && this.chains[i].inserts[k];
+    return inst && inst.meter ? inst.meter() : null;
+  }
+
 }
 
 export { faderToDb, dbToFader, fmtDb, defaults };
