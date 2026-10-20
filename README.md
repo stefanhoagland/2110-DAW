@@ -25,7 +25,8 @@ Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channe
 
 The **Live** tab is a mixing console for the inputs, for remixing a live source for a stream:
 
-- One strip per input with gain, an 80 Hz high-pass, 3-band EQ (120 Hz low shelf, 1 kHz mid, 8 kHz high shelf), a one-knob compressor, pan, fader with a post-fader meter, mute and solo. Settings are remembered. Double-click any control to reset it.
+- One strip per input with gain, plugin slots, pan, a fader with a post-fader meter, mute and solo. Settings are remembered. Double-click any control to reset it.
+- **Plugins:** use **+ Plugin** on a strip to insert High-pass, Gate, EQ (low shelf, parametric mid, high shelf), Compressor, Limiter, Delay or Reverb, as many as you like, processed top to bottom. Click a plugin to open its editor, where you can adjust it, bypass it, move it earlier or later in the chain, or remove it. Compressor and Limiter show their gain reduction. These are built-in web plugins; browsers can't load VST/AU plugins.
 - **Go live** turns the live mix on (it always starts off, so opening the page never causes feedback).
 - **Output** sends the whole mix to another audio device. Pick a virtual cable (BlackHole on macOS, VB-CABLE on Windows) and select that cable as the audio source in OBS to stream the mix.
 - **Master limiter** keeps the stream from clipping. The master fader and meter in the top bar show the final output.

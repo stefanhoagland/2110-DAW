@@ -231,7 +231,6 @@ label.check { cursor: pointer; }
 .knob-top output { font-variant-numeric: tabular-nums; color: var(--text); }
 .knob input { width: 100%; margin: 0; }
 .strip button { padding: 3px 0; font-size: 11px; font-weight: 700; }
-.strip .hpf.on { background: var(--accent); border-color: var(--accent); color: #0b1220; }
 .fader-area { display: flex; justify-content: center; gap: 8px; flex: 1; min-height: 160px; max-height: 420px; }
 .vmeter { width: 10px; height: 100%; border-radius: 2px; }
 .fader { writing-mode: vertical-lr; direction: rtl; height: 100%; width: 24px; margin: 0; }
@@ -240,3 +239,47 @@ label.check { cursor: pointer; }
 .strip-btns button { flex: 1; }
 .strip .mute.on { background: var(--mute); border-color: var(--mute); color: #111; }
 .strip .solo.on { background: var(--solo); border-color: var(--solo); color: #111; }
+
+/* plugin inserts */
+.live-view { position: relative; }
+.inserts { display: flex; flex-direction: column; gap: 3px; min-height: 128px; }
+.insert-list { display: flex; flex-direction: column; gap: 3px; }
+.insert {
+  background: #23344f;
+  border-color: #35507a;
+  font-size: 11px;
+  text-align: left;
+  padding: 3px 6px !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.insert.bypassed { background: var(--panel-2); border-color: var(--line); color: var(--muted); text-decoration: line-through; }
+.insert.editing { outline: 2px solid var(--accent); }
+.add-plugin { font-size: 11px; padding: 3px 4px; width: 100%; color: var(--muted); }
+.plugin-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 320px;
+  max-width: calc(100% - 32px);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 5;
+}
+.pp-head { display: flex; align-items: center; gap: 8px; }
+.pp-head strong { flex: 1; }
+.pp-head button { padding: 2px 8px; }
+.pp-params { display: flex; flex-direction: column; gap: 8px; }
+.pp-param { display: grid; grid-template-columns: 110px 1fr 70px; align-items: center; gap: 8px; font-size: 12px; }
+.pp-param span { color: var(--muted); }
+.pp-param output { text-align: right; font-variant-numeric: tabular-nums; }
+.pp-param input { width: 100%; }
+.pp-actions { display: flex; gap: 6px; }
+#pp-bypass.on { background: var(--mute); border-color: var(--mute); color: #111; }

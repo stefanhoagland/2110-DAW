@@ -109,6 +109,34 @@ try {
   const stripPeak = await maxPeak((d) => d.live.peak(0));
   await page.click('#btn-live');
   const onPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  // Plugins: a gate with a 0 dB threshold on channels 1 and 2 silences them;
+  // bypassing it brings the sound back.
+  await page.evaluate(() => [0, 1].forEach((i) => { // -6 dB input gain so the full-scale test tone sits under 0 dB
+    const g = window.daw.tracks[i].strip.querySelector('input[data-key="trim"]');
+    g.value = -6; g.dispatchEvent(new Event('input'));
+  }));
+  for (const i of [0, 1]) {
+    await page.locator('.strip .add-plugin').nth(i).selectOption('gate');
+    await page.evaluate(() => {
+      const r = document.querySelector('#pp-params input');
+      r.value = 0; r.dispatchEvent(new Event('input'));
+    });
+  }
+  await page.waitForTimeout(300);
+  const gatedPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  for (const i of [0, 1]) {
+    await page.locator('.strip').nth(i).locator('.insert').first().click();
+    await page.click('#pp-bypass');
+  }
+  const bypassPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  // Add a compressor and check it reports gain reduction in the editor.
+  await page.locator('.strip .add-plugin').nth(0).selectOption('comp');
+  // The test tone is intermittent, so wait until it is being compressed.
+  await page.waitForFunction(() => /Gain reduction -[1-9]/.test(document.getElementById('pp-gr').textContent), null, { timeout: 5000 }).catch(() => {});
+  const grText = await page.textContent('#pp-gr');
+  const inserts = await page.locator('.strip').nth(0).locator('.insert').allTextContents();
+  await page.click('#pp-close');
+
   // Pull channel 1 and 2 faders all the way down: master should go quiet.
   await page.evaluate(() => [0, 1].forEach((i) => {
     const f = window.daw.tracks[i].strip.querySelector('.fader');
@@ -117,8 +145,9 @@ try {
   await page.waitForTimeout(200);
   const downPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
   const liveVisible = await page.isVisible('#console') && !(await page.isVisible('#tracks-area'));
-  const live = { offPeak, stripPeak, onPeak, downPeak, liveVisible };
-  const liveOk = liveVisible && offPeak < 0.001 && stripPeak > 0.05 && onPeak > 0.05 && downPeak < 0.001;
+  const live = { offPeak, stripPeak, onPeak, gatedPeak, bypassPeak, grText, inserts, downPeak, liveVisible };
+  const liveOk = liveVisible && offPeak < 0.001 && stripPeak > 0.05 && onPeak > 0.05 && downPeak < 0.001
+    && gatedPeak < 0.01 && bypassPeak > 0.05 && /Gain reduction -\d/.test(grText) && inserts.join() === 'Gate,Compressor';
 
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
   console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, errors });
