@@ -97,10 +97,33 @@ try {
   const exported = (await (await download.createReadStream()).toArray()).join('');
   const namesOk = exported.startsWith('Channel,Name\r\n1,Kick\r\n2,Ch 2\r\n3,"Snare, top"');
 
+  // Live mode: switch tab, go live, and check the mix reaches the master output.
+  await page.click('.mode[data-mode="live"]');
+  const maxPeak = (fn) => page.evaluate(async (src) => {
+    const f = new Function('daw', `return (${src})(daw)`);
+    let m = 0;
+    for (let i = 0; i < 40; i++) { m = Math.max(m, f(window.daw)); await new Promise((r) => setTimeout(r, 50)); }
+    return m;
+  }, fn.toString());
+  const offPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  const stripPeak = await maxPeak((d) => d.live.peak(0));
+  await page.click('#btn-live');
+  const onPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  // Pull channel 1 and 2 faders all the way down: master should go quiet.
+  await page.evaluate(() => [0, 1].forEach((i) => {
+    const f = window.daw.tracks[i].strip.querySelector('.fader');
+    f.value = 0; f.dispatchEvent(new Event('input'));
+  }));
+  await page.waitForTimeout(200);
+  const downPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
+  const liveVisible = await page.isVisible('#console') && !(await page.isVisible('#tracks-area'));
+  const live = { offPeak, stripPeak, onPeak, downPeak, liveVisible };
+  const liveOk = liveVisible && offPeak < 0.001 && stripPeak > 0.05 && onPeak > 0.05 && downPeak < 0.001;
+
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, errors });
+  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && tabOk.join() === 'Bass,Keys,true' && diskOk
+    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && liveOk && tabOk.join() === 'Bass,Keys,true' && diskOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {

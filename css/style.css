@@ -188,3 +188,55 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
   .track-header .meter { width: 70px; }
   .track-header .pan { display: none; }
 }
+
+/* ---------- Live mode ---------- */
+[hidden] { display: none !important; }
+.live-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.live-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.go-live { font-weight: 700; padding: 6px 16px; }
+.go-live.on { background: var(--rec); border-color: var(--rec); color: #fff; }
+label.check { cursor: pointer; }
+.console {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px;
+  overflow: auto;
+  min-height: 0;
+}
+.strip {
+  flex: none;
+  width: 92px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.strip.no-input { opacity: 0.5; }
+.strip-head { display: flex; gap: 4px; align-items: baseline; min-width: 0; }
+.strip-num { color: var(--muted); font-size: 11px; }
+.strip-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.knob { display: flex; flex-direction: column; gap: 1px; }
+.knob-top { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+.knob-top output { font-variant-numeric: tabular-nums; color: var(--text); }
+.knob input { width: 100%; margin: 0; }
+.strip button { padding: 3px 0; font-size: 11px; font-weight: 700; }
+.strip .hpf.on { background: var(--accent); border-color: var(--accent); color: #0b1220; }
+.fader-area { display: flex; justify-content: center; gap: 8px; flex: 1; min-height: 160px; max-height: 420px; }
+.vmeter { width: 10px; height: 100%; border-radius: 2px; }
+.fader { writing-mode: vertical-lr; direction: rtl; height: 100%; width: 24px; margin: 0; }
+.fader-db { text-align: center; font: 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.strip-btns { display: flex; gap: 4px; }
+.strip-btns button { flex: 1; }
+.strip .mute.on { background: var(--mute); border-color: var(--mute); color: #111; }
+.strip .solo.on { background: var(--solo); border-color: var(--solo); color: #111; }

@@ -15,6 +15,8 @@ export class AudioEngine extends EventTarget {
     this.playing = false;
     this.playStartCtxTime = 0;
     this.playStartOffset = 0;
+    this.limiterOn = true;
+    this.sinkId = '';
   }
 
   get sampleRate() {
@@ -66,11 +68,21 @@ export class AudioEngine extends EventTarget {
     this.source.connect(this.recorder);
     this.recorder.connect(this.ctx.destination); // outputs silence; keeps the node running
 
+    // Master bus: master gain -> (optional limiter) -> output, metered after the limiter.
     this.master = this.ctx.createGain();
-    this.master.connect(this.ctx.destination);
-    // Taps for the master meter (left and right of the playback mix).
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -1;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.001;
+    this.limiter.release.value = 0.1;
+    this.out = this.ctx.createGain();
+    this.out.connect(this.ctx.destination);
+    this.limiter.connect(this.out);
+    this.setLimiter(this.limiterOn);
+    // Taps for the master meter (left and right of the output).
     const split = this.ctx.createChannelSplitter(2);
-    this.master.connect(split);
+    this.out.connect(split);
     this.masterTaps = [0, 1].map((ch) => {
       const a = this.ctx.createAnalyser();
       a.fftSize = 2048;
@@ -78,7 +90,9 @@ export class AudioEngine extends EventTarget {
       return a;
     });
     this.tapBuf = new Float32Array(2048);
+    if (this.sinkId) await this.setOutput(this.sinkId).catch(() => {});
     await this.ctx.resume();
+    this.dispatchEvent(new Event('opened'));
     return { channels: this.deviceChannels, sampleRate: this.ctx.sampleRate, label: this.stream.getAudioTracks()[0].label };
   }
 
@@ -87,6 +101,38 @@ export class AudioEngine extends EventTarget {
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     if (this.ctx) await this.ctx.close();
     this.ctx = this.stream = this.source = this.recorder = this.master = this.masterTaps = null;
+    this.limiter = this.out = null;
+  }
+
+  // Brick-wall-style limiter on the master output, to keep a stream from clipping.
+  setLimiter(on) {
+    this.limiterOn = !!on;
+    if (!this.master) return;
+    this.master.disconnect();
+    this.master.connect(this.limiterOn ? this.limiter : this.out);
+  }
+
+  async listOutputs() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter((d) => d.kind === 'audiooutput');
+  }
+
+  get canChooseOutput() {
+    return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+  }
+
+  // Send the whole mix to another output device (e.g. a virtual cable OBS listens to).
+  async setOutput(deviceId) {
+    this.sinkId = deviceId || '';
+    if (this.ctx && this.canChooseOutput) await this.ctx.setSinkId(this.sinkId);
+  }
+
+  // Rough input-to-output delay of the browser audio path, in seconds.
+  get latency() {
+    if (!this.ctx) return 0;
+    const track = this.stream && this.stream.getAudioTracks()[0];
+    const inLat = (track && track.getSettings().latency) || 0;
+    return inLat + (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0);
   }
 
   startRecording(armed) {

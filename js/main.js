@@ -2,6 +2,7 @@ import { AudioEngine, MAX_CHANNELS } from './audio-engine.js';
 import { peaksOf } from './wav.js';
 import { DiskWriter, MemoryWriter, canUseFolders, pickFolder, downloadBlob, safeName } from './storage.js';
 import { namesFromCsv, namesToCsv } from './csv.js';
+import { LiveMixer, faderToDb, fmtDb, defaults as stripDefaults } from './live.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
 const ROW_H = 64;
@@ -23,6 +24,7 @@ const state = {
   selected: null, // index of the track whose clip is selected
   saving: false, // finishing files after a take
   dirty: true,
+  mode: 'studio',
 };
 
 const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
@@ -48,15 +50,7 @@ const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
   el: null,
 }));
 
-loadSaved();
-buildTrackHeaders();
-bindControls();
-requestAnimationFrame(frame);
-
-if (!canUseFolders) {
-  $('btn-folder').disabled = true;
-  $('folder-info').textContent = 'Saving to a folder needs Chrome or Edge. Use “Download WAVs” after recording.';
-}
+let live; // LiveMixer, created in init()
 
 // ---------- persistence ----------
 
@@ -75,6 +69,7 @@ function save() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(tracks.map((t) => ({ name: t.name, armed: t.armed }))));
   } catch (_) { /* storage unavailable */ }
+  refreshStripNames();
 }
 
 // ---------- UI construction ----------
@@ -217,6 +212,7 @@ async function enableAudio() {
       sel.appendChild(o);
     }
     sel.disabled = false;
+    await listOutputs();
     $('btn-enable').textContent = 'Refresh devices';
     $('btn-enable').classList.remove('primary');
     await openDevice();
@@ -237,6 +233,8 @@ async function openDevice() {
       (info.channels < MAX_CHANNELS ? ` · tracks ${info.channels + 1}–${MAX_CHANNELS} have no input` : '');
     tracks.forEach((t) => (t.hasInput = t.index < info.channels));
     refreshAll();
+    tracks.forEach((t) => t.strip.classList.toggle('no-input', !t.hasInput));
+    $('live-latency').textContent = engine.latency ? `Latency ≈ ${Math.round(engine.latency * 1000)} ms` : '';
     if (info.channels < MAX_CHANNELS) {
       notice(`This input gives the browser ${info.channels} channel${info.channels === 1 ? '' : 's'}, so tracks ${info.channels + 1}–${MAX_CHANNELS} will record silence. ` +
         `For all ${MAX_CHANNELS} channels, use Chrome with an interface that appears as one multichannel device (see README).`);
@@ -412,6 +410,163 @@ async function stopRecording() {
     (state.folder && !memory ? ` · saved to “${state.folder.name}”` : '');
   if (problems.length) notice(`Some tracks failed to save: ${problems.join('; ')}`, true);
   state.dirty = true;
+}
+
+// ---------- modes ----------
+
+function loadMode() {
+  try { return localStorage.getItem('daw2110.mode') === 'live' ? 'live' : 'studio'; } catch (_) { return 'studio'; }
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  document.querySelectorAll('.studio-only').forEach((el) => (el.hidden = mode !== 'studio'));
+  document.querySelectorAll('.live-only').forEach((el) => (el.hidden = mode !== 'live'));
+  try { localStorage.setItem('daw2110.mode', mode); } catch (_) { /* storage unavailable */ }
+  state.dirty = true;
+}
+
+// ---------- live console ----------
+
+const KNOB_TEXT = {
+  trim: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+  hi: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+  mid: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+  lo: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+  comp: (v) => (v ? `${Math.round(v * 100)}%` : 'off'),
+  pan: (v) => panText(v).replace('center', 'C'),
+};
+const KNOB_TITLE = {
+  trim: 'Input gain (dB)', hi: 'High shelf at 8 kHz (dB)', mid: 'Mid at 1 kHz (dB)',
+  lo: 'Low shelf at 120 Hz (dB)', comp: 'Compression amount', pan: 'Pan',
+};
+
+function buildStrips() {
+  const tpl = $('strip-template');
+  const consoleEl = $('console');
+  for (const t of tracks) {
+    const el = tpl.content.firstElementChild.cloneNode(true);
+    t.strip = el;
+    t.live = { meter: 0, hold: 0, holdUntil: 0, clip: false };
+    el.querySelector('.strip-num').textContent = t.index + 1;
+    const p = () => live.params[t.index];
+    const sync = () => {
+      el.querySelectorAll('input[data-key]').forEach((inp) => {
+        const key = inp.dataset.key;
+        inp.value = p()[key];
+        const out = inp.closest('.knob')?.querySelector('output');
+        if (out) out.textContent = KNOB_TEXT[key](p()[key]);
+        if (KNOB_TITLE[key]) inp.title = `${KNOB_TITLE[key]}: ${KNOB_TEXT[key](p()[key])}`;
+      });
+      el.querySelector('.fader-db').textContent = fmtDb(faderToDb(p().fader));
+      el.querySelector('.fader').title = `Fader ${fmtDb(faderToDb(p().fader))} dB (double-click for 0 dB)`;
+      ['hpf', 'mute', 'solo'].forEach((k) => el.querySelector(`.${k}`).classList.toggle('on', p()[k]));
+    };
+    el.querySelectorAll('input[data-key]').forEach((inp) => {
+      inp.addEventListener('input', () => { live.set(t.index, inp.dataset.key, +inp.value); sync(); });
+      inp.addEventListener('dblclick', () => { live.set(t.index, inp.dataset.key, stripDefaults()[inp.dataset.key]); sync(); });
+    });
+    el.querySelectorAll('button[data-key]').forEach((b) => {
+      b.addEventListener('click', () => {
+        live.set(t.index, b.dataset.key, !p()[b.dataset.key]);
+        if (b.dataset.key === 'solo') tracks.forEach((x) => x.syncStrip()); else sync();
+      });
+    });
+    el.querySelector('.vmeter').addEventListener('click', () => { t.live.clip = false; t.live.hold = 0; });
+    t.syncStrip = sync;
+    sync();
+    consoleEl.appendChild(el);
+  }
+  refreshStripNames();
+}
+
+function refreshStripNames() {
+  for (const t of tracks) {
+    if (!t.strip) continue;
+    const n = t.strip.querySelector('.strip-name');
+    if (n.textContent !== t.name) { n.textContent = t.name; n.title = t.name; }
+  }
+}
+
+function bindLive() {
+  document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => {
+    if (!b.disabled) setMode(b.dataset.mode);
+  }));
+  $('btn-live').addEventListener('click', () => {
+    if (!state.open) { notice('Click “Enable audio” and pick your interface first.'); return; }
+    live.setOn(!live.on);
+    refreshLiveStatus();
+  });
+  const lim = $('chk-limiter');
+  lim.checked = engine.limiterOn;
+  lim.addEventListener('change', () => { engine.setLimiter(lim.checked); live.save(); });
+  $('sel-output').addEventListener('change', async (e) => {
+    try {
+      await engine.setOutput(e.target.value);
+      live.save();
+      refreshLiveStatus();
+    } catch (err) {
+      notice(`Could not switch output: ${err.message}`, true);
+    }
+  });
+  if (!engine.canChooseOutput) $('sel-output').title = 'Choosing an output needs Chrome 110 or newer';
+}
+
+async function listOutputs() {
+  const sel = $('sel-output');
+  if (!engine.canChooseOutput) return;
+  const outs = await engine.listOutputs();
+  sel.innerHTML = '';
+  for (const d of outs) {
+    if (d.deviceId === 'default' || d.deviceId === 'communications') continue;
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || 'Output';
+    sel.appendChild(o);
+  }
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = 'Default output';
+  sel.prepend(def);
+  sel.value = [...sel.options].some((o) => o.value === engine.sinkId) ? engine.sinkId : '';
+  sel.disabled = false;
+}
+
+function refreshLiveStatus() {
+  const btn = $('btn-live');
+  btn.classList.toggle('on', live.on);
+  btn.textContent = live.on ? 'LIVE' : 'Go live';
+  const sel = $('sel-output');
+  const out = sel.options[sel.selectedIndex]?.textContent || 'the default output';
+  $('live-status').textContent = live.on ? `Live mix is going to ${out}` : 'Live mix is off';
+}
+
+function drawLiveMeters() {
+  const now = performance.now();
+  for (const t of tracks) {
+    feedMeter(t.live, live.peak(t.index), now);
+    const { g, w, h } = fitCanvas(t.strip.querySelector('.vmeter'));
+    // vertical bar: bottom = -60 dB, top = 0 dB
+    g.fillStyle = '#0c0d10';
+    g.fillRect(0, 0, w, h);
+    const lvl = dbPos(t.live.meter) * h;
+    const grad = g.createLinearGradient(0, h, 0, 0);
+    grad.addColorStop(0, '#2ed573');
+    grad.addColorStop(dbPos(10 ** (-12 / 20)), '#2ed573');
+    grad.addColorStop(dbPos(10 ** (-6 / 20)), '#f5c542');
+    grad.addColorStop(1, '#ff4757');
+    g.fillStyle = grad;
+    g.fillRect(0, h - lvl, w, lvl);
+    for (const db of METER_TICKS) {
+      g.fillStyle = 'rgba(12,13,16,0.85)';
+      g.fillRect(0, h - tickX(db, h), w, 1);
+    }
+    const hy = dbPos(t.live.hold) * h;
+    if (hy > 1) { g.fillStyle = '#e6e8ee'; g.fillRect(0, h - hy, w, 2); }
+    if (t.live.clip) { g.fillStyle = '#ff4757'; g.fillRect(0, 0, w, 5); }
+    t.live.meter *= 0.88;
+  }
 }
 
 // ---------- channel names CSV ----------
@@ -603,7 +758,8 @@ function drawMasterMeter() {
 }
 
 function drawMeters() {
-  for (const t of tracks) {
+  if (state.mode === 'live') drawLiveMeters();
+  for (const t of state.mode === 'studio' ? tracks : []) {
     const { g, w, h } = fitCanvas(t.el.querySelector('.meter'));
     drawBar(g, 0, 0, w, h, t);
     for (const db of METER_TICKS) {
@@ -764,5 +920,25 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
+// ---------- start-up ----------
+
+function init() {
+  loadSaved();
+  buildTrackHeaders();
+  live = new LiveMixer(engine, tracks);
+  buildStrips();
+  bindControls();
+  bindLive();
+  setMode(loadMode());
+  requestAnimationFrame(frame);
+
+  if (!canUseFolders) {
+    $('btn-folder').disabled = true;
+    $('folder-info').textContent = 'Saving to a folder needs Chrome or Edge. Use “Download WAVs” after recording.';
+  }
+}
+
+init();
+
 // Expose for debugging and automated tests.
-window.daw = { engine, state, tracks };
+window.daw = { engine, state, tracks, live };

@@ -4,7 +4,7 @@ A browser-based digital audio workstation with three modes:
 
 - **Studio**: multitrack recording now; effects and mixdown for post production next.
 - **Soundcheck** (planned): play recorded tracks back out to separate outputs on your interface so each lands on its own console channel for a virtual soundcheck.
-- **Live** (planned): low-latency live input with real-time effects and a stereo mix for streaming.
+- **Live**: a mixing console for the live inputs, with EQ, compression and a stereo mix you can send to your streaming software.
 
 ## What works today: 32-channel recorder
 
@@ -20,6 +20,18 @@ A browser-based digital audio workstation with three modes:
 - Click a clip to select it and press `Delete` (or the Delete button) to remove it. If it was saved to a folder, the WAV file is moved into a `Deleted` subfolder there, so it can be recovered.
 
 Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channel's name (`Shift+Tab` goes back). `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.
+
+## Live mode
+
+The **Live** tab is a mixing console for the inputs, for remixing a live source for a stream:
+
+- One strip per input with gain, an 80 Hz high-pass, 3-band EQ (120 Hz low shelf, 1 kHz mid, 8 kHz high shelf), a one-knob compressor, pan, fader with a post-fader meter, mute and solo. Settings are remembered. Double-click any control to reset it.
+- **Go live** turns the live mix on (it always starts off, so opening the page never causes feedback).
+- **Output** sends the whole mix to another audio device. Pick a virtual cable (BlackHole on macOS, VB-CABLE on Windows) and select that cable as the audio source in OBS to stream the mix.
+- **Master limiter** keeps the stream from clipping. The master fader and meter in the top bar show the final output.
+- You can record the multitrack in Studio while the live mix is running; both use the same inputs.
+
+The browser adds some delay (the bar shows an estimate, usually 20–60 ms). That's fine for a stream but too much for in-ear monitoring.
 
 ## Running it
 
@@ -86,4 +98,4 @@ No build step: plain HTML, CSS and JavaScript modules.
 1. 32-channel recorder ✅ (32 is Chrome's per-device limit; 128 would need several devices combined or a desktop app)
 2. Soundcheck mode: recorded tracks out to separate interface outputs
 3. Studio mode: per-track effects (EQ, compressor, gate, reverb) and mixdown export
-4. Live mode: low-latency monitoring, real-time effects, stream mix output
+4. Live mode ✅ (first version: console with EQ, compressor, output choice and limiter)
