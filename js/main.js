@@ -503,13 +503,7 @@ function panText(p) {
 
 function onMeter(peaks) {
   const now = performance.now();
-  for (let i = 0; i < tracks.length; i++) {
-    const t = tracks[i];
-    const p = peaks[i] || 0;
-    if (p > t.meter) t.meter = p;
-    if (p >= t.hold || now > t.holdUntil) { t.hold = p; t.holdUntil = now + 1500; }
-    if (p >= 0.999) t.clip = true;
-  }
+  tracks.forEach((t, i) => feedMeter(t, peaks[i] || 0, now));
 }
 
 const METER_FLOOR = -60; // dB at the left edge of a meter
@@ -530,49 +524,96 @@ function dbText(v) {
   return db >= -0.05 ? '0.0' : db.toFixed(1);
 }
 
-function drawMeters() {
+function fitCanvas(c) {
   const dpr = window.devicePixelRatio || 1;
+  const cw = c.clientWidth, ch = c.clientHeight;
+  if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
+    c.width = Math.round(cw * dpr);
+    c.height = Math.round(ch * dpr);
+  }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { g, w: cw, h: ch };
+}
+
+const tickX = (db, w) => Math.round(((db - METER_FLOOR) / -METER_FLOOR) * w);
+
+// One horizontal meter bar: level with fall-off, peak-hold line, clip light.
+function drawBar(g, x0, y0, w, h, m) {
+  g.fillStyle = '#16181d';
+  g.fillRect(x0, y0, w, h);
+  const grad = g.createLinearGradient(x0, 0, x0 + w, 0);
+  grad.addColorStop(0, '#2ed573');
+  grad.addColorStop(dbPos(10 ** (-12 / 20)), '#2ed573');
+  grad.addColorStop(dbPos(10 ** (-6 / 20)), '#f5c542');
+  grad.addColorStop(1, '#ff4757');
+  g.fillStyle = grad;
+  g.fillRect(x0, y0, dbPos(m.meter) * w, h);
+  for (const db of METER_TICKS) {
+    g.fillStyle = 'rgba(12,13,16,0.85)';
+    g.fillRect(x0 + tickX(db, w) - 1, y0, 1, h);
+  }
+  const hx = dbPos(m.hold) * w;
+  if (hx > 1) { g.fillStyle = '#e6e8ee'; g.fillRect(x0 + hx - 1, y0, 2, h); }
+  if (m.clip) { g.fillStyle = '#ff4757'; g.fillRect(x0 + w - 5, y0, 5, h); }
+}
+
+function setReadout(el, m) {
+  const text = dbText(m.hold);
+  if (el.textContent !== text) el.textContent = text;
+  el.classList.toggle('clip', m.clip);
+}
+
+// Feed a new peak into a meter's state ({ meter, hold, holdUntil, clip }).
+function feedMeter(m, p, now) {
+  if (p > m.meter) m.meter = p;
+  if (p >= m.hold || now > m.holdUntil) { m.hold = p; m.holdUntil = now + 1500; }
+  if (p >= 0.999) m.clip = true;
+}
+
+const masterMeters = [0, 1].map(() => ({ meter: 0, hold: 0, holdUntil: 0, clip: false }));
+document.getElementById('master-meter').addEventListener('click', () => {
+  masterMeters.forEach((m) => { m.clip = false; m.hold = 0; });
+});
+
+function drawMasterMeter() {
+  const now = performance.now();
+  engine.masterPeaks().forEach((p, i) => feedMeter(masterMeters[i], p, now));
+  const { g, w, h } = fitCanvas($('master-meter'));
+  g.clearRect(0, 0, w, h);
+  const barH = 10;
+  drawBar(g, 0, 0, w, barH, masterMeters[0]);
+  drawBar(g, 0, h - barH, w, barH, masterMeters[1]);
+  // scale between the bars
+  g.font = '9px ui-monospace, Menlo, Consolas, monospace';
+  g.textBaseline = 'middle';
+  g.fillStyle = '#8b92a3';
+  let lastRight = -Infinity;
+  for (const db of METER_TICKS) {
+    const label = String(db);
+    const tw = g.measureText(label).width;
+    const lx = Math.min(w - tw, Math.max(0, tickX(db, w) - tw / 2));
+    if (lx < lastRight + 4 && db !== 0) continue; // skip labels that would collide
+    g.fillText(label, lx, h / 2);
+    lastRight = lx + tw;
+  }
+  setReadout($('master-db-l'), masterMeters[0]);
+  setReadout($('master-db-r'), masterMeters[1]);
+  masterMeters.forEach((m) => (m.meter *= 0.88));
+}
+
+function drawMeters() {
   for (const t of tracks) {
-    const c = t.el.querySelector('.meter');
-    const cw = c.clientWidth, ch = c.clientHeight;
-    if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
-      c.width = Math.round(cw * dpr);
-      c.height = Math.round(ch * dpr);
-    }
-    const g = c.getContext('2d');
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const w = cw, h = ch;
-    g.fillStyle = '#0c0d10';
-    g.fillRect(0, 0, w, h);
-    const x = dbPos(t.meter) * w;
-    const grad = g.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, '#2ed573');
-    grad.addColorStop(dbPos(10 ** (-12 / 20)), '#2ed573');
-    grad.addColorStop(dbPos(10 ** (-6 / 20)), '#f5c542');
-    grad.addColorStop(1, '#ff4757');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, x, h);
-
-    // dB tick marks
+    const { g, w, h } = fitCanvas(t.el.querySelector('.meter'));
+    drawBar(g, 0, 0, w, h, t);
     for (const db of METER_TICKS) {
-      const tx = Math.round(((db - METER_FLOOR) / -METER_FLOOR) * w) - 1;
-      g.fillStyle = 'rgba(12,13,16,0.85)';
-      g.fillRect(tx, 0, 1, h);
       g.fillStyle = 'rgba(139,146,163,0.55)';
-      g.fillRect(tx, h - 3, 1, 3);
+      g.fillRect(tickX(db, w) - 1, h - 3, 1, 3);
     }
-
-    const hx = dbPos(t.hold) * w;
-    if (hx > 1) { g.fillStyle = '#e6e8ee'; g.fillRect(hx - 1, 0, 2, h); }
-    if (t.clip) { g.fillStyle = '#ff4757'; g.fillRect(w - 5, 0, 5, h); }
-
-    // numeric peak-hold readout
-    const label = t.el.querySelector('.db');
-    const text = dbText(t.hold);
-    if (label.textContent !== text) label.textContent = text;
-    label.classList.toggle('clip', t.clip);
+    setReadout(t.el.querySelector('.db'), t);
     t.meter *= 0.88; // fall-off
   }
+  drawMasterMeter();
 }
 
 // ---------- timeline ----------
