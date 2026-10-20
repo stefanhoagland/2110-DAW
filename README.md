@@ -26,6 +26,31 @@ npm start            # serves on http://localhost:8110
 
 (Any static server works, for example `python3 -m http.server`.) You can also publish the repo with GitHub Pages and use it from there.
 
+## Running on Unraid (Docker)
+
+Every push to `main` builds a Docker image at `ghcr.io/stefanhoagland/2110-daw:latest`. It serves the app over HTTPS with a self-signed certificate, because browsers block audio interfaces on plain HTTP unless the page is on `localhost`.
+
+1. In Unraid, open a terminal and download the template:
+   ```sh
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-2110-DAW.xml \
+     https://raw.githubusercontent.com/stefanhoagland/2110-DAW/main/unraid/2110-daw.xml
+   ```
+2. Go to **Docker → Add Container**, pick **2110-DAW** from the Template list.
+3. Set **Certificate hostnames** to your server's IP (and hostname if you use one), e.g. `192.168.1.50,tower.local`. Leave the ports as 8443 (HTTPS) and 8110 (HTTP) unless they clash. Click **Apply**.
+4. On the computer with your audio interface, open `https://<server-ip>:8443` in Chrome. Chrome warns about the self-signed certificate the first time: click **Advanced → Proceed**.
+
+The certificate is stored in `/mnt/user/appdata/2110-daw/certs`. To use a real certificate, replace `cert.pem` and `key.pem` there and restart the container. If you already run a reverse proxy with HTTPS (Nginx Proxy Manager, SWAG), point it at the HTTP port instead.
+
+The audio still runs in your browser, on the computer the interface is plugged into; the server only hosts the app. Recordings save to that computer (or wherever the save folder points), not to the server.
+
+Without the template, the equivalent command is:
+
+```sh
+docker run -d --name 2110-daw -p 8443:443 -p 8110:80 \
+  -e CERT_HOSTNAMES=192.168.1.50 -v /mnt/user/appdata/2110-daw:/config \
+  ghcr.io/stefanhoagland/2110-daw:latest
+```
+
 ## Getting all 16 channels into the browser
 
 Browsers see an audio interface the same way they see a microphone, and some drivers only hand the browser the first 2 channels. The app shows how many channels it actually received next to the input picker; tracks without an input record silence.

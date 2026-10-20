@@ -3,17 +3,19 @@
 import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
 
-const server = await serve(8111);
+// Set BASE_URL to test a running copy instead, e.g. the Docker container.
+const base = process.env.BASE_URL || 'http://localhost:8111/';
+const server = process.env.BASE_URL ? null : await serve(8111);
 const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 });
 let failed = false;
 try {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, ignoreHTTPSErrors: true });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto('http://localhost:8111/');
+  await page.goto(base);
   await page.click('#btn-enable');
   await page.waitForFunction(() => window.daw.state.open, null, { timeout: 10000 });
   const info = await page.textContent('#device-info');
@@ -42,6 +44,6 @@ try {
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {
   await browser.close();
-  server.close();
+  server?.close();
 }
 process.exit(failed ? 1 : 0);
