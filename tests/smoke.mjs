@@ -102,7 +102,9 @@ try {
   const maxPeak = (fn) => page.evaluate(async (src) => {
     const f = new Function('daw', `return (${src})(daw)`);
     let m = 0;
-    for (let i = 0; i < 40; i++) { m = Math.max(m, f(window.daw)); await new Promise((r) => setTimeout(r, 50)); }
+    // The fake microphone plays short beeps and a strip meter only sees the
+    // last ~12 ms, so sample often to catch them.
+    for (let i = 0; i < 200; i++) { m = Math.max(m, f(window.daw)); await new Promise((r) => setTimeout(r, 10)); }
     return m;
   }, fn.toString());
   const offPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
@@ -122,7 +124,9 @@ try {
       r.value = 0; r.dispatchEvent(new Event('input'));
     });
   }
-  await page.waitForTimeout(300);
+  // The gate opened on the default threshold before it was raised; let its
+  // release tail die away.
+  await page.waitForTimeout(1500);
   const gatedPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
   for (const i of [0, 1]) {
     await page.locator('.strip').nth(i).locator('.insert').first().click();

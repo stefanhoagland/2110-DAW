@@ -94,3 +94,13 @@ export async function serverWams() {
       .map((e) => ({ url: `plugins/${encodeURIComponent(e.name)}/index.js`, name: e.name }));
   } catch (_) { return []; }
 }
+
+// Free plugins that ship with the Docker image (see docker/bundle-plugins.sh).
+export async function bundledWams() {
+  try {
+    const res = await fetch('bundled-plugins/index.json', { cache: 'no-store' });
+    if (!res.ok) return [];
+    const list = await res.json();
+    return Array.isArray(list) ? list.filter((x) => x && typeof x.url === 'string' && typeof x.name === 'string') : [];
+  } catch (_) { return []; }
+}

@@ -2,3 +2,4 @@ node_modules/
 tests/smoke.png
 .DS_Store
 /plugins/
+/bundled-plugins/

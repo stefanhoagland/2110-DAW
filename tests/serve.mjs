@@ -18,6 +18,13 @@ export function serve(port = 8110) {
       res.end(JSON.stringify(dirs.filter((d) => d.isDirectory()).map((d) => ({ name: d.name, type: 'directory' }))));
       return;
     }
+    if (path === 'bundled-plugins/index.json' || path === 'bundled-plugins\\index.json') {
+      // Only there after `npm run plugins`; otherwise no bundled plugins.
+      const body = await readFile(join(root, path)).catch(() => '[]');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(body);
+      return;
+    }
     try {
       const body = await readFile(join(root, path || 'index.html'));
       res.writeHead(200, { 'content-type': types[extname(path || 'index.html')] || 'application/octet-stream' });
