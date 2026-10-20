@@ -3,7 +3,7 @@ import { peaksOf } from './wav.js';
 import { DiskWriter, MemoryWriter, canUseFolders, pickFolder, downloadBlob, safeName } from './storage.js';
 import { namesFromCsv, namesToCsv } from './csv.js';
 import { LiveMixer, faderToDb, fmtDb, pluginName, defaults as stripDefaults } from './live.js';
-import { loadWamModule, knownWams, rememberWam, serverWams } from './wam.js';
+import { loadWamModule, knownWams, rememberWam, serverWams, bundledWams } from './wam.js';
 import { PLUGINS, PLUGIN_ORDER, formatParam } from './plugins.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
@@ -29,7 +29,7 @@ const state = {
   mode: 'studio',
   editing: null, // { t, k }: plugin open in the editor
   editorGui: null, // { wam, gui }: a third-party plugin's own editor on screen
-  serverWams: [], // plugins in the server's plugins folder
+  serverWams: [], // plugins bundled with the server or in its plugins folder
 };
 
 const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
@@ -1184,7 +1184,7 @@ function init() {
   bindPluginPanel();
   setMode(loadMode());
   requestAnimationFrame(frame);
-  serverWams().then((list) => { state.serverWams = list; if (list.length) refreshAddMenus(); });
+  Promise.all([bundledWams(), serverWams()]).then(([a, b]) => { state.serverWams = [...a, ...b]; if (state.serverWams.length) refreshAddMenus(); });
   setInterval(() => live.saveWamStates(), 5000); // third-party editors don't report changes
 
   if (!canUseFolders) {
