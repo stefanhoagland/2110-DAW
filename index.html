@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2110 DAW</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">2110 <span>DAW</span></div>
+
+    <nav class="modes" aria-label="Mode">
+      <button class="mode" data-mode="live" disabled title="Coming in a later step">Live</button>
+      <button class="mode active" data-mode="studio">Studio</button>
+      <button class="mode" data-mode="soundcheck" disabled title="Coming in a later step">Soundcheck</button>
+    </nav>
+
+    <div class="transport">
+      <button id="btn-rtz" title="Return to zero (Home)" aria-label="Return to zero">⏮</button>
+      <button id="btn-stop" title="Stop (Space)" aria-label="Stop">■</button>
+      <button id="btn-play" title="Play (Space)" aria-label="Play">▶</button>
+      <button id="btn-rec" class="rec" title="Record (R)" aria-label="Record">●</button>
+      <div id="clock" class="clock">00:00:00.000</div>
+    </div>
+  </header>
+
+  <section class="setup">
+    <button id="btn-enable" class="primary">Enable audio</button>
+    <label>Input
+      <select id="sel-input" disabled><option>Click “Enable audio” first</option></select>
+    </label>
+    <label>Sample rate
+      <select id="sel-rate">
+        <option value="">Device default</option>
+        <option value="44100">44.1 kHz</option>
+        <option value="48000">48 kHz</option>
+        <option value="96000">96 kHz</option>
+      </select>
+    </label>
+    <span id="device-info" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="btn-folder">Choose save folder</button>
+    <span id="folder-info" class="muted"></span>
+    <button id="btn-export" disabled>Download WAVs</button>
+  </section>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <section class="toolbar">
+    <button id="btn-arm-all">Arm all</button>
+    <button id="btn-arm-none">Disarm all</button>
+    <span id="take-info" class="muted">No takes yet</span>
+    <span class="spacer"></span>
+    <button id="btn-zoom-out" aria-label="Zoom out">−</button>
+    <span class="muted">Zoom</span>
+    <button id="btn-zoom-in" aria-label="Zoom in">+</button>
+  </section>
+
+  <main class="tracks-area" id="tracks-area">
+    <div class="headers" id="headers">
+      <div class="ruler-spacer">
+        <span>Master</span>
+        <input id="master-vol" type="range" min="0" max="1.5" step="0.01" value="1" aria-label="Master volume">
+      </div>
+    </div>
+    <div class="timeline" id="timeline">
+      <div class="timeline-content" id="timeline-content">
+        <canvas id="timeline-canvas"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <template id="track-template">
+    <div class="track-header">
+      <div class="row1">
+        <span class="num"></span>
+        <input class="name" maxlength="24" aria-label="Track name">
+        <button class="arm" title="Record arm">●</button>
+        <button class="mute" title="Mute">M</button>
+        <button class="solo" title="Solo">S</button>
+      </div>
+      <div class="row2">
+        <canvas class="meter" width="160" height="10" aria-hidden="true"></canvas>
+        <input class="vol" type="range" min="0" max="1.5" step="0.01" value="1" aria-label="Volume">
+        <input class="pan" type="range" min="-1" max="1" step="0.01" value="0" aria-label="Pan">
+      </div>
+    </div>
+  </template>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
