@@ -7,30 +7,68 @@ using namespace juce;
 static const String sep = String (CharPointer_UTF8 ("  \xc2\xb7  "));
 static const String sep1 = String (CharPointer_UTF8 (" \xc2\xb7 "));
 
-static constexpr int rowHeight = 34;
 static constexpr int defaultTracks = 32; // shown when no device is open
+
+// Width of a web-style button: text plus 10 px padding each side.
+static int widthOf (TextButton& b)
+{
+    return GlyphArrangement::getStringWidthInt (FontOptions (13.0f), b.getButtonText()) + 22;
+}
 
 MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 {
-    title.setText ("Soundbending Live", dontSendNotification);
-    title.setFont (FontOptions (19.0f, Font::bold));
-    addAndMakeVisible (title);
+    LookAndFeel::setDefaultLookAndFeel (&look);
 
-    for (auto* l : { &deviceInfo, &folderInfo, &status })
+    for (auto* l : { &deviceInfo, &folderInfo, &takeInfo, &zoomLabel })
     {
         l->setColour (Label::textColourId, theme::textMuted);
+        l->setFont (FontOptions (13.0f));
+        l->setMinimumHorizontalScale (1.0f);
         addAndMakeVisible (*l);
     }
-    clock.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 22.0f, Font::plain));
+    zoomLabel.setText ("Zoom", dontSendNotification);
+    zoomLabel.setJustificationType (Justification::centred);
+    notice.setColour (Label::textColourId, Colour (0xffffd98a));
+    notice.setFont (FontOptions (13.0f));
+    addChildComponent (notice);
+
+    clock.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 18.0f, Font::plain));
     clock.setJustificationType (Justification::centred);
-    clock.setColour (Label::backgroundColourId, theme::meterBack);
     addAndMakeVisible (clock);
 
-    for (auto* b : { &audioButton, &folderButton, &armAll, &disarmAll, &importButton, &exportButton, &recordButton })
-        addAndMakeVisible (*b);
+    // Mode tabs. Only the recorder (Studio) exists in the Mac app so far.
+    for (auto* t : { &liveTab, &studioTab, &soundcheckTab })
+    {
+        WebLook::setStyle (*t, "mode");
+        addAndMakeVisible (*t);
+    }
+    studioTab.setToggleState (true, dontSendNotification);
+    liveTab.setEnabled (false);
+    soundcheckTab.setEnabled (false);
+    liveTab.setTooltip ("The live console is coming to the Mac app in a later step");
+    soundcheckTab.setTooltip ("Coming in a later step");
 
-    recordButton.setColour (TextButton::buttonColourId, theme::record.darker (0.3f));
+    for (auto* b : { &rtzButton, &stopButton, &playButton, &recordButton })
+    {
+        WebLook::setStyle (*b, "transport");
+        addAndMakeVisible (*b);
+    }
+    rtzButton.setTooltip ("Return to zero");
+    playButton.setTooltip ("Playback is coming to the Mac app in a later step");
+    rtzButton.setEnabled (false);
+    playButton.setEnabled (false);
+    stopButton.setTooltip ("Stop");
     recordButton.setTooltip ("Record the armed tracks (R)");
+    recordButton.getProperties().set ("textColour", (int64) theme::record.getARGB());
+    recordButton.setColour (TextButton::buttonOnColourId, theme::record);
+    recordButton.setColour (TextButton::textColourOnId, Colours::white);
+
+    WebLook::setStyle (audioButton, "primary");
+    for (auto* b : { &audioButton, &folderButton, &armAll, &disarmAll, &importButton, &exportButton, &zoomOut, &zoomIn })
+        addAndMakeVisible (*b);
+    importButton.setTooltip ("Load channel names from a CSV file (Channel, Name)");
+    exportButton.setTooltip ("Save channel names as a CSV file");
+
     audioButton.onClick = [this] { showAudioSettings(); };
     folderButton.onClick = [this] { chooseFolder(); };
     armAll.onClick = [this] { for (auto* r : rows) r->setArmed (true); saveTracks(); };
@@ -38,8 +76,11 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     importButton.onClick = [this] { importNames(); };
     exportButton.onClick = [this] { exportNames(); };
     recordButton.onClick = [this] { toggleRecord(); };
+    stopButton.onClick = [this] { if (engine.isRecording()) stopRecording(); };
+    zoomOut.onClick = [this] { trackArea.zoom (1.0 / 1.5); };
+    zoomIn.onClick = [this] { trackArea.zoom (1.5); };
 
-    viewport.setViewedComponent (&rowHolder, false);
+    viewport.setViewedComponent (&trackArea, false);
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
@@ -49,6 +90,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
                                                                        : music.getChildFile ("Soundbending Live");
     folder = File (settings.getValue ("folder", defaultFolder.getFullPathName()));
     take = nextTakeNumber() - 1;
+    takeInfo.setText ("No takes yet", dontSendNotification);
 
     auto deviceXml = settings.getXmlValue ("audioDevice");
     engine.initialise (deviceXml.get());
@@ -57,7 +99,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     refreshLabels();
 
     setWantsKeyboardFocus (true);
-    setSize (980, 720);
+    setSize (1100, 720);
     startTimerHz (30);
 }
 
@@ -66,47 +108,108 @@ MainComponent::~MainComponent()
     engine.devices().removeChangeListener (this);
     engine.stopRecording();
     saveTracks();
+    LookAndFeel::setDefaultLookAndFeel (nullptr);
 }
 
 void MainComponent::paint (Graphics& g)
 {
     g.fillAll (theme::background);
+
+    // Top bar, setup bar (panel colour) and toolbar, each with a line underneath.
     g.setColour (theme::panel);
-    g.fillRect (getLocalBounds().removeFromTop (112));
+    g.fillRect (topBar);
+    g.fillRect (setupBar);
+    g.setColour (theme::line);
+    for (auto r : { topBar, setupBar, toolBar })
+        g.fillRect (r.getX(), r.getBottom() - 1, r.getWidth(), 1);
+    if (notice.isVisible())
+    {
+        g.setColour (Colour (0xff3a2d10));
+        g.fillRect (noticeBar);
+    }
+
+    // "Soundbending Live" with "Live" in the accent colour, like the web brand.
+    g.setFont (FontOptions (18.0f, Font::bold));
+    const String first = "Soundbending ", second = "Live";
+    const int w1 = GlyphArrangement::getStringWidthInt (g.getCurrentFont(), first);
+    auto brand = topBar.withTrimmedLeft (16);
+    g.setColour (theme::text);
+    g.drawText (first, brand, Justification::centredLeft);
+    g.setColour (theme::accent);
+    g.drawText (second, brand.withTrimmedLeft (w1), Justification::centredLeft);
+
+    g.setColour (theme::background);
+    g.fillRoundedRectangle (modesPill.toFloat(), 8.0f);
+    g.setColour (theme::clockBack);
+    g.fillRoundedRectangle (clockBox.toFloat(), 6.0f);
 }
 
 void MainComponent::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (112).reduced (14, 10);
 
-    auto row1 = top.removeFromTop (36);
-    title.setBounds (row1.removeFromLeft (190));
-    recordButton.setBounds (row1.removeFromRight (110));
-    row1.removeFromRight (10);
-    clock.setBounds (row1.removeFromRight (150));
-    row1.removeFromRight (10);
-    audioButton.setBounds (row1.removeFromLeft (130).reduced (0, 3));
-    row1.removeFromLeft (8);
-    deviceInfo.setBounds (row1);
-
-    top.removeFromTop (6);
-    auto row2 = top.removeFromTop (30);
-    folderButton.setBounds (row2.removeFromLeft (110));
-    row2.removeFromLeft (8);
-    for (auto* b : { &exportButton, &importButton, &disarmAll, &armAll })
+    // Top bar: brand, modes, then the transport on the right.
+    topBar = r.removeFromTop (56);
     {
-        b->setBounds (row2.removeFromRight (b == &armAll || b == &disarmAll ? 90 : 110));
-        row2.removeFromRight (6);
-    }
-    folderInfo.setBounds (row2);
+        auto b = topBar.reduced (16, 10).withTrimmedBottom (1);
+        const int brandW = GlyphArrangement::getStringWidthInt (FontOptions (18.0f, Font::bold), "Soundbending Live");
+        b.removeFromLeft (brandW + 24);
+        int pillW = 6 + 4 * 2;
+        for (auto* t : { &liveTab, &studioTab, &soundcheckTab }) pillW += widthOf (*t) + 8;
+        modesPill = b.removeFromLeft (pillW).withSizeKeepingCentre (pillW, 34);
+        auto p = modesPill.reduced (3);
+        for (auto* t : { &liveTab, &studioTab, &soundcheckTab })
+        {
+            t->setBounds (p.removeFromLeft (widthOf (*t) + 8));
+            p.removeFromLeft (4);
+        }
 
-    status.setBounds (top.removeFromTop (24));
+        clockBox = b.removeFromRight (150).withSizeKeepingCentre (150, 34);
+        clock.setBounds (clockBox);
+        b.removeFromRight (6);
+        for (auto* t : { &recordButton, &playButton, &stopButton, &rtzButton })
+        {
+            t->setBounds (b.removeFromRight (40).withSizeKeepingCentre (40, 34));
+            b.removeFromRight (6);
+        }
+    }
+
+    // Setup bar: audio device on the left, save folder on the right.
+    setupBar = r.removeFromTop (46);
+    {
+        auto b = setupBar.reduced (16, 8).withTrimmedBottom (1);
+        audioButton.setBounds (b.removeFromLeft (widthOf (audioButton)));
+        b.removeFromLeft (10);
+        const int folderW = jmin (GlyphArrangement::getStringWidthInt (FontOptions (13.0f), folderInfo.getText()) + 12,
+                                  b.getWidth() / 2);
+        folderInfo.setBounds (b.removeFromRight (folderW));
+        b.removeFromRight (10);
+        folderButton.setBounds (b.removeFromRight (widthOf (folderButton)));
+        b.removeFromRight (10);
+        deviceInfo.setBounds (b);
+    }
+
+    noticeBar = notice.isVisible() ? r.removeFromTop (34) : Rectangle<int>();
+    notice.setBounds (noticeBar.reduced (12, 0));
+
+    // Toolbar: names and arming, take info, zoom.
+    toolBar = r.removeFromTop (46);
+    {
+        auto b = toolBar.reduced (16, 8).withTrimmedBottom (1);
+        for (auto* t : { &armAll, &disarmAll, &importButton, &exportButton })
+        {
+            t->setBounds (b.removeFromLeft (widthOf (*t)));
+            b.removeFromLeft (10);
+        }
+        zoomIn.setBounds (b.removeFromRight (30));
+        zoomLabel.setBounds (b.removeFromRight (50));
+        zoomOut.setBounds (b.removeFromRight (30));
+        b.removeFromRight (10);
+        takeInfo.setBounds (b);
+    }
 
     viewport.setBounds (r);
-    rowHolder.setSize (viewport.getMaximumVisibleWidth(), rows.size() * rowHeight);
-    for (int i = 0; i < rows.size(); ++i)
-        rows[i]->setBounds (0, i * rowHeight, rowHolder.getWidth(), rowHeight);
+    trackArea.layout (viewport.getMaximumVisibleWidth());
 }
 
 void MainComponent::rebuildTracks()
@@ -136,7 +239,7 @@ void MainComponent::rebuildTracks()
             }
             else grabKeyboardFocus();
         };
-        rowHolder.addAndMakeVisible (row);
+        trackArea.addAndMakeVisible (row);
     }
     resized();
 }
@@ -269,10 +372,10 @@ void MainComponent::startRecording()
 
     take = next;
     for (auto* r : rows) r->setLocked (true);
+    for (auto* r : rows) if (r->isArmed()) r->startWave(); else r->clearWave();
     audioButton.setEnabled (false);
     folderButton.setEnabled (false);
-    recordButton.setButtonText ("Stop");
-    recordButton.setColour (TextButton::buttonColourId, theme::record);
+    recordButton.setToggleState (true, dontSendNotification);
     setStatus ("Recording take " + String (take) + sep1 + String ((int) armed.size()) + " tracks");
 }
 
@@ -285,8 +388,9 @@ void MainComponent::stopRecording()
     for (auto* r : rows) r->setLocked (false);
     audioButton.setEnabled (true);
     folderButton.setEnabled (true);
-    recordButton.setButtonText ("Record");
-    recordButton.setColour (TextButton::buttonColourId, theme::record.darker (0.3f));
+    recordButton.setToggleState (false, dontSendNotification);
+    recordButton.setAlpha (1.0f);
+    lastTakeSeconds = seconds;
     if (drops > 0)
         setStatus ("Take " + String (take) + " saved, but the disk fell behind " + String (drops)
                    + " times and some audio is missing. Use a faster drive or a larger buffer.", true);
@@ -297,8 +401,19 @@ void MainComponent::stopRecording()
 
 void MainComponent::setStatus (const String& text, bool error)
 {
-    status.setText (text, dontSendNotification);
-    status.setColour (Label::textColourId, error ? theme::record : theme::textMuted);
+    // Errors go in the yellow notice bar (like the web version); everything else next to the toolbar.
+    if (error)
+    {
+        notice.setText (text, dontSendNotification);
+        notice.setVisible (true);
+    }
+    else
+    {
+        takeInfo.setText (text, dontSendNotification);
+        notice.setVisible (false);
+    }
+    resized();
+    repaint();
 }
 
 void MainComponent::refreshLabels()
@@ -310,19 +425,29 @@ void MainComponent::refreshLabels()
     folderInfo.setText (folder.getFullPathName() + (free > 0 ? sep + File::descriptionOfSizeInBytes (free)
                         + " free (about " + String (hours, 1) + " h at all inputs)" : String()),
                         dontSendNotification);
+    resized();
 }
 
 void MainComponent::timerCallback()
 {
+    const bool rec = engine.isRecording();
+    const double secs = rec ? engine.recordedSeconds() : lastTakeSeconds;
     for (auto* r : rows)
-        r->setLevel (engine.takePeak (r->channel()));
+    {
+        const float peak = engine.takePeak (r->channel());
+        r->setLevel (peak);
+        if (rec && r->hasTake()) r->addWave (secs, peak);
+    }
+    trackArea.setTake (take, secs, rec);
 
-    const double secs = engine.isRecording() ? engine.recordedSeconds() : 0.0;
-    const int h = (int) secs / 3600, m = ((int) secs / 60) % 60;
-    const double s = std::fmod (secs, 60.0);
+    const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
+    const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;
     clock.setText (String (h).paddedLeft ('0', 2) + ":" + String (m).paddedLeft ('0', 2) + ":"
-                   + String (s, 1).paddedLeft ('0', 4), dontSendNotification);
-    clock.setColour (Label::textColourId, engine.isRecording() ? theme::record : theme::text);
+                   + String (s).paddedLeft ('0', 2) + "." + String (ms).paddedLeft ('0', 3), dontSendNotification);
+    clock.setColour (Label::textColourId, rec ? theme::record : theme::text);
+
+    // Blink the record button while recording, like the web version.
+    recordButton.setAlpha (rec && (Time::getMillisecondCounter() / 500) % 2 ? 0.6f : 1.0f);
 }
 
 bool MainComponent::keyPressed (const KeyPress& key)

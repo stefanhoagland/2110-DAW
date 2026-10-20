@@ -1,9 +1,11 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "AudioEngine.h"
-#include "TrackRow.h"
+#include "TrackArea.h"
+#include "Look.h"
 
-// The recorder window: device and folder controls, transport, and one row per input.
+// The main window, laid out like the web version's Studio view: top bar with modes and
+// transport, a setup bar (device, save folder), a toolbar, then the tracks and timeline.
 class MainComponent : public juce::Component,
                       private juce::Timer,
                       private juce::ChangeListener
@@ -40,14 +42,21 @@ private:
     AudioEngine engine;
     juce::File folder;
     int take = 0;
+    double lastTakeSeconds = 0.0;
 
-    juce::Label title, deviceInfo, folderInfo, clock, status;
-    juce::TextButton audioButton { "Audio settings" }, folderButton { "Save folder" },
+    WebLook look;
+    juce::Label deviceInfo, folderInfo, clock, takeInfo, notice;
+    juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" };
+    juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },
+                     playButton { juce::CharPointer_UTF8 ("\xe2\x96\xb6") }, recordButton { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
+    juce::TextButton audioButton { "Audio settings" }, folderButton { "Choose save folder" },
                      armAll { "Arm all" }, disarmAll { "Disarm all" },
                      importButton { "Import names" }, exportButton { "Export names" },
-                     recordButton { "Record" };
+                     zoomOut { juce::CharPointer_UTF8 ("\xe2\x88\x92") }, zoomIn { "+" };
+    juce::Label zoomLabel;
+    juce::Rectangle<int> topBar, setupBar, toolBar, noticeBar, modesPill, clockBox;
     juce::OwnedArray<TrackRow> rows;
-    juce::Component rowHolder;
+    TrackArea trackArea { rows };
     juce::Viewport viewport;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };

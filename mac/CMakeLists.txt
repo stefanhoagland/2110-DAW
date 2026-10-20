@@ -28,6 +28,8 @@ target_sources(DAW2110 PRIVATE
   Source/AudioEngine.cpp
   Source/MainComponent.cpp
   Source/TrackRow.cpp
+  Source/TrackArea.cpp
+  Source/Look.cpp
   Source/Names.cpp)
 
 target_compile_definitions(DAW2110 PRIVATE
