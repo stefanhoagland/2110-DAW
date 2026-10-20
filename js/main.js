@@ -1,6 +1,7 @@
 import { AudioEngine, MAX_CHANNELS } from './audio-engine.js';
 import { peaksOf } from './wav.js';
 import { DiskWriter, MemoryWriter, canUseFolders, pickFolder, downloadBlob, safeName } from './storage.js';
+import { namesFromCsv, namesToCsv } from './csv.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
 const ROW_H = 64;
@@ -140,6 +141,13 @@ function bindControls() {
   $('btn-rtz').addEventListener('click', () => { setPlayhead(0); $('timeline').scrollLeft = 0; });
   $('btn-arm-all').addEventListener('click', () => { if (state.recording) return; tracks.forEach((t) => (t.armed = true)); save(); refreshAll(); });
   $('btn-arm-none').addEventListener('click', () => { if (state.recording) return; tracks.forEach((t) => (t.armed = false)); save(); refreshAll(); });
+  $('btn-names-export').addEventListener('click', exportNames);
+  $('btn-names-import').addEventListener('click', () => $('names-file').click());
+  $('names-file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) importNames(file);
+  });
   $('btn-zoom-in').addEventListener('click', () => zoom(1.5));
   $('btn-zoom-out').addEventListener('click', () => zoom(1 / 1.5));
   $('master-vol').addEventListener('input', (e) => { if (engine.master) engine.master.gain.value = +e.target.value; });
@@ -378,6 +386,36 @@ async function stopRecording() {
     (state.folder && !memory ? ` · saved to “${state.folder.name}”` : '');
   if (problems.length) notice(`Some tracks failed to save: ${problems.join('; ')}`, true);
   state.dirty = true;
+}
+
+// ---------- channel names CSV ----------
+
+const NAME_MAX = 24;
+
+function exportNames() {
+  const blob = new Blob([namesToCsv(tracks.map((t) => t.name))], { type: 'text/csv' });
+  downloadBlob(blob, 'channel-names.csv');
+}
+
+async function importNames(file) {
+  try {
+    const entries = namesFromCsv(await file.text());
+    let count = 0;
+    for (const { channel, name } of entries) {
+      const t = tracks[channel - 1];
+      if (!t) continue;
+      t.name = name.slice(0, NAME_MAX);
+      t.el.querySelector('.name').value = t.name;
+      count++;
+    }
+    save();
+    state.dirty = true;
+    notice(count
+      ? `Named ${count} channel${count === 1 ? '' : 's'} from ${file.name}.`
+      : `No channel names found in ${file.name}. Use two columns: Channel, Name.`, !count);
+  } catch (err) {
+    notice(`Could not read ${file.name}: ${err.message}`, true);
+  }
 }
 
 // ---------- deleting ----------

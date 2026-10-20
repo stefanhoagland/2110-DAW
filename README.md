@@ -14,6 +14,7 @@ A browser-based digital audio workstation with three modes:
 - **Choose save folder** (Chrome or Edge) streams every track straight to disk while recording, so long takes don't fill memory. Without a folder, takes stay in memory and **Download WAVs** saves them.
 - Timeline with waveforms, zoom, click-to-locate and playback of the last take.
 
+- **Import names / Export names** load and save channel names as a CSV file with `Channel,Name` columns (a plain list of names, one per line, also works). Handy for keeping a channel list per show or copying it from your console's input list.
 - Click a clip to select it and press `Delete` (or the Delete button) to remove it. If it was saved to a folder, the WAV file is moved into a `Deleted` subfolder there, so it can be recovered.
 
 Keyboard: `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.

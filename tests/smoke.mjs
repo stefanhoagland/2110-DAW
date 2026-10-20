@@ -71,10 +71,17 @@ try {
   const diskOk = disk && files.deleted.length === 1 && files.deleted[0].startsWith('T02_02_')
     && files.root.filter((n) => n.startsWith('T02_')).length === 15;
 
+  // Import channel names from CSV, then export them again.
+  await page.setInputFiles('#names-file', { name: 'names.csv', mimeType: 'text/csv', buffer: Buffer.from('Channel,Name\n1,Kick\n3,"Snare, top"\n') });
+  await page.waitForFunction(() => window.daw.tracks[2].name === 'Snare, top', null, { timeout: 5000 });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-names-export')]);
+  const exported = (await (await download.createReadStream()).toArray()).join('');
+  const namesOk = exported.startsWith('Channel,Name\r\n1,Kick\r\n2,Ch 2\r\n3,"Snare, top"');
+
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, afterDelete, files, errors });
+  console.log({ info, ...result, playing, afterDelete, namesOk, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && diskOk
+    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && namesOk && diskOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {

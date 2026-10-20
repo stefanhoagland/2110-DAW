@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node tests/serve.mjs",
-    "test": "node --test tests/wav.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "test:browser": "node tests/smoke.mjs"
   },
   "devDependencies": {
