@@ -6,10 +6,10 @@ A browser-based digital audio workstation with three modes:
 - **Soundcheck** (planned): play recorded tracks back out to separate outputs on your interface so each lands on its own console channel for a virtual soundcheck.
 - **Live** (planned): low-latency live input with real-time effects and a stereo mix for streaming.
 
-## What works today: 16-channel recorder
+## What works today: 32-channel recorder
 
 - Pick your audio interface and sample rate.
-- 16 tracks with names, record arm, level meters with dB tick marks and a peak readout in dBFS (click to reset), clip light, volume, pan, mute and solo.
+- 32 tracks with names, record arm, level meters with dB tick marks and a peak readout in dBFS (click to reset), clip light, volume, pan, mute and solo.
 - A stereo **master meter** (left/right, with dB scale and peak readouts) next to the master volume slider shows the playback mix level.
 - Per-track **volume** (wider slider) and **pan** (smaller slider) only affect playback, never what is recorded. Hover to see the value; double-click to reset to 0 dB or center.
 - Record all armed tracks at once, sample-aligned, as **24-bit mono WAV files, one per channel**.
@@ -56,12 +56,12 @@ docker run -d --name 2110-daw -p 8443:443 -p 8110:80 \
   ghcr.io/stefanhoagland/2110-daw:latest
 ```
 
-## Getting all 16 channels into the browser
+## Getting all 32 channels into the browser
 
 Browsers see an audio interface the same way they see a microphone, and some drivers only hand the browser the first 2 channels. The app shows how many channels it actually received next to the input picker; tracks without an input record silence.
 
 - Use **Chrome**, which supports multichannel capture.
-- The interface needs to appear to the computer as **one device with 16 inputs**. On macOS, check the input count in Audio MIDI Setup; an Aggregate Device can combine inputs. On Windows, a class-compliant or WASAPI driver that exposes all inputs as one device works best; ASIO-only drivers are not visible to browsers.
+- The interface needs to appear to the computer as **one device with up to 32 inputs**. On macOS, check the input count in Audio MIDI Setup; an Aggregate Device can combine inputs. On Windows, a class-compliant or WASAPI driver that exposes all inputs as one device works best; ASIO-only drivers are not visible to browsers.
 - Turn off other apps holding the interface in exclusive mode.
 
 ## Development
@@ -83,7 +83,7 @@ No build step: plain HTML, CSS and JavaScript modules.
 
 ## Roadmap
 
-1. 16-channel recorder ✅
-2. Soundcheck mode: 16 recorded tracks out to 16 interface outputs
+1. 32-channel recorder ✅ (32 is Chrome's per-device limit; 128 would need several devices combined or a desktop app)
+2. Soundcheck mode: recorded tracks out to separate interface outputs
 3. Studio mode: per-track effects (EQ, compressor, gate, reverb) and mixdown export
 4. Live mode: low-latency monitoring, real-time effects, stream mix output

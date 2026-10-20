@@ -1,6 +1,6 @@
 // Audio input, recording and playback.
 
-export const MAX_CHANNELS = 16;
+export const MAX_CHANNELS = 32; // Chrome allows at most 32 channels per input device
 
 export class AudioEngine extends EventTarget {
   constructor() {
