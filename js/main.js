@@ -19,6 +19,8 @@ const state = {
   playhead: 0,
   pxPerSec: 40,
   writers: [], // [{ track, writer }] for the take being recorded
+  selected: null, // index of the track whose clip is selected
+  saving: false, // finishing files after a take
   dirty: true,
 };
 
@@ -35,6 +37,8 @@ const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
   peaks: [],
   peakRate: 48000 / PEAK_STEP,
   fileName: null,
+  dir: null, // folder the clip's file was saved in, if any
+  fileHandle: null,
   memWriter: null,
   meter: 0,
   hold: 0,
@@ -141,7 +145,13 @@ function bindControls() {
   $('timeline-canvas').addEventListener('click', (e) => {
     if (state.recording) return;
     const t = ($('timeline').scrollLeft + e.offsetX) / state.pxPerSec;
+    const row = Math.floor((e.offsetY - RULER_H) / ROW_H);
+    const track = e.offsetY > RULER_H ? tracks[row] : null;
+    select(track && track.buffer && t <= track.buffer.duration ? row : null);
     setPlayhead(Math.max(0, t));
+  });
+  $('btn-delete-clip').addEventListener('click', () => {
+    if (state.selected !== null) deleteClips([tracks[state.selected]]);
   });
   window.addEventListener('resize', () => (state.dirty = true));
 
@@ -150,6 +160,8 @@ function bindControls() {
     if (e.code === 'Space') { e.preventDefault(); state.recording ? stopAll() : togglePlay(); }
     else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); toggleRecord(); }
     else if (e.key === 'Home' || e.key === 'Enter') { e.preventDefault(); $('btn-rtz').click(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selected !== null) { e.preventDefault(); $('btn-delete-clip').click(); }
+    else if (e.key === 'Escape') select(null);
   });
 
   engine.addEventListener('meter', (e) => onMeter(e.detail.peaks));
@@ -271,6 +283,7 @@ function stopAll() {
 
 async function toggleRecord() {
   if (state.recording) return stopRecording();
+  if (state.saving) return;
   if (!state.open) { notice('Click “Enable audio” and pick your interface first.'); return; }
   const armed = tracks.filter((t) => t.armed);
   if (!armed.length) { notice('No tracks are armed. Click ● on the tracks you want to record.'); return; }
@@ -303,7 +316,10 @@ async function toggleRecord() {
     track.peakRate = sr / PEAK_STEP;
     track.fileName = fileName;
     track.memWriter = null;
+    track.dir = state.folder;
+    track.fileHandle = null;
   }
+  select(null);
   state.recording = true;
   state.recFrames = 0;
   state.playhead = 0;
@@ -331,6 +347,7 @@ async function stopRecording() {
   if (!state.recording) return;
   await engine.stopRecording();
   state.recording = false;
+  state.saving = true;
   $('btn-rec').classList.remove('on');
   const seconds = state.recFrames / engine.sampleRate;
   $('take-info').textContent = `Saving take ${state.take}…`;
@@ -345,6 +362,7 @@ async function stopRecording() {
         track.memWriter = writer;
         memory = true;
       } else {
+        track.fileHandle = writer.handle;
         track.buffer = await engine.decode(await writer.readArrayBuffer());
       }
     } catch (err) {
@@ -352,10 +370,50 @@ async function stopRecording() {
     }
   }
   state.writers = [];
-  $('btn-export').disabled = !memory;
+  state.saving = false;
+  refreshClipButtons();
   $('take-info').textContent = `Take ${state.take} · ${formatTime(seconds)}` +
     (state.folder && !memory ? ` · saved to “${state.folder.name}”` : '');
   if (problems.length) notice(`Some tracks failed to save: ${problems.join('; ')}`, true);
+  state.dirty = true;
+}
+
+// ---------- deleting ----------
+
+function select(index) {
+  state.selected = index;
+  refreshClipButtons();
+  state.dirty = true;
+}
+
+function refreshClipButtons() {
+  const busy = state.recording || state.saving;
+  $('btn-delete-clip').disabled = busy || state.selected === null;
+  $('btn-export').disabled = busy || !tracks.some((t) => t.memWriter);
+}
+
+// Removes clips from the timeline right away. Their WAV files are moved into a
+// "Deleted" subfolder of the save folder rather than erased, so a slip of the
+// Delete key never loses a recording for good.
+async function deleteClips(list) {
+  if (state.recording || state.saving || !list.length) return;
+  stopPlayback();
+  const kept = [];
+  for (const t of list) {
+    if (t.dir && t.fileHandle) {
+      try {
+        if (typeof t.fileHandle.move !== 'function') throw new Error('not supported');
+        const trash = await t.dir.getDirectoryHandle('Deleted', { create: true });
+        await t.fileHandle.move(trash);
+      } catch (_) {
+        kept.push(t.fileName);
+      }
+    }
+    Object.assign(t, { buffer: null, peaks: [], fileName: null, memWriter: null, dir: null, fileHandle: null });
+  }
+  select(null);
+  if (!hasClips()) { state.playhead = 0; $('take-info').textContent = 'No takes yet'; }
+  notice(kept.length ? `Removed from the timeline. This browser couldn't move ${kept.join(', ')} into the Deleted folder, so the file is still in your save folder.` : '');
   state.dirty = true;
 }
 
@@ -464,6 +522,11 @@ function drawTimeline(pos) {
     const cx0 = Math.max(0, x0), cx1 = Math.min(w, x1);
     g.fillStyle = recording ? 'rgba(255,71,87,0.18)' : 'rgba(79,163,255,0.16)';
     g.fillRect(cx0, y + 3, cx1 - cx0, ROW_H - 7);
+    if (state.selected === i && !recording) {
+      g.strokeStyle = '#e6e8ee';
+      g.lineWidth = 2;
+      g.strokeRect(x0 + 1, y + 4, x1 - x0 - 2, ROW_H - 9);
+    }
 
     // waveform
     const mid = y + ROW_H / 2 - 1;

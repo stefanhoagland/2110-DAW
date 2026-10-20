@@ -23,7 +23,7 @@ try {
   await page.keyboard.press('r');
   await page.waitForTimeout(2000);
   await page.click('#btn-stop');
-  await page.waitForFunction(() => window.daw.tracks[0].buffer, null, { timeout: 10000 });
+  await page.waitForFunction(() => !window.daw.state.saving && window.daw.tracks[0].buffer, null, { timeout: 10000 });
   const result = await page.evaluate(() => {
     const t = window.daw.tracks;
     return {
@@ -37,10 +37,45 @@ try {
   await page.click('#btn-play');
   await page.waitForTimeout(700);
   const playing = await page.evaluate(() => window.daw.engine.playing && window.daw.engine.playPosition > 0.2);
+  await page.click('#btn-stop');
+
+  // Select the clip on track 1 and press Delete.
+  let box = await page.locator('#timeline-canvas').boundingBox();
+  await page.mouse.click(box.x + 20, box.y + 28 + 32);
+  await page.keyboard.press('Delete');
+  const afterDelete = await page.evaluate(() => window.daw.tracks.filter((x) => x.buffer).length);
+  const firstGone = await page.evaluate(() => !window.daw.tracks[0].buffer);
+
+  // Record a second take into a folder (the browser's private file system
+  // stands in for a real folder), then delete a clip and check its WAV moved
+  // into the Deleted subfolder.
+  const disk = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    window.daw.state.folder = root;
+    return true;
+  });
+  await page.keyboard.press('r');
+  await page.waitForTimeout(1200);
+  await page.click('#btn-stop');
+  await page.waitForFunction(() => window.daw.state.take === 2 && !window.daw.state.saving && window.daw.tracks[0].buffer, null, { timeout: 10000 });
+  box = await page.locator('#timeline-canvas').boundingBox(); // the notice bar may have closed
+  await page.mouse.click(box.x + 20, box.y + 28 + 64 + 32);
+  await page.keyboard.press('Delete');
+  await page.waitForFunction(() => !window.daw.tracks[1].buffer, null, { timeout: 5000 });
+  const files = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const list = async (d) => { const out = []; for await (const [n, h] of d.entries()) out.push(h.kind === 'directory' ? `${n}/` : n); return out.sort(); };
+    const deleted = await list(await root.getDirectoryHandle('Deleted'));
+    return { root: await list(root), deleted };
+  });
+  const diskOk = disk && files.deleted.length === 1 && files.deleted[0].startsWith('T02_02_')
+    && files.root.filter((n) => n.startsWith('T02_')).length === 15;
+
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, errors });
+  console.log({ info, ...result, playing, afterDelete, files, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 16 && result.exportEnabled && playing && errors.length === 0;
+    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && diskOk
+    && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {
   await browser.close();
