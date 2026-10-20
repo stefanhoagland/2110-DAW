@@ -47,6 +47,8 @@ public:
     void audioDeviceStopped() override;
 
 private:
+    void selectLargestInput();
+
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread writerThread { "2110 DAW disk writer" };
 
