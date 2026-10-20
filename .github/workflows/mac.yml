@@ -1,0 +1,55 @@
+name: Mac app
+
+on:
+  push:
+    branches: [main]
+    paths: ['mac/**', '.github/workflows/mac.yml']
+  pull_request:
+    paths: ['mac/**', '.github/workflows/mac.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write # to publish the app on the "mac-latest" release
+
+jobs:
+  mac-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Configure (universal: Apple Silicon and Intel)"
+        run: cmake -S mac -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Tests
+        run: |
+          cmake --build build --target NamesTest EngineTest -j 4
+          ./build/NamesTest
+          ./build/EngineTest
+
+      - name: Build app
+        run: cmake --build build --target DAW2110 -j 4
+
+      - name: Package
+        run: |
+          app="build/DAW2110_artefacts/Release/2110 DAW.app"
+          # Ad-hoc signature: required for Apple Silicon; not notarized.
+          codesign --force --deep --sign - "$app"
+          ditto -c -k --keepParent "$app" "2110-DAW-mac.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 2110-DAW-mac
+          path: 2110-DAW-mac.zip
+
+      - name: Publish to the mac-latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Latest Mac build of 2110 DAW from ${GITHUB_SHA::7}. Download 2110-DAW-mac.zip, unzip, move 2110 DAW to Applications, then right-click it and choose Open the first time."
+          if gh release view mac-latest >/dev/null 2>&1; then
+            gh release upload mac-latest 2110-DAW-mac.zip --clobber
+            gh release edit mac-latest --notes "$notes" --target "$GITHUB_SHA"
+          else
+            gh release create mac-latest 2110-DAW-mac.zip --prerelease --title "2110 DAW for Mac (latest)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
