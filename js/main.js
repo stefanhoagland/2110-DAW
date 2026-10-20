@@ -106,9 +106,17 @@ function buildTrackHeaders() {
     });
     el.querySelector('.mute').addEventListener('click', () => { t.mute = !t.mute; refreshAll(); applyMix(); });
     el.querySelector('.solo').addEventListener('click', () => { t.solo = !t.solo; refreshAll(); applyMix(); });
-    el.querySelector('.vol').addEventListener('input', (e) => { t.volume = +e.target.value; applyMix(); });
-    el.querySelector('.pan').addEventListener('input', (e) => { t.pan = +e.target.value; applyMix(); });
-    el.querySelector('.pan').addEventListener('dblclick', (e) => { e.target.value = 0; t.pan = 0; applyMix(); });
+    const vol = el.querySelector('.vol');
+    const pan = el.querySelector('.pan');
+    const label = () => {
+      vol.title = `Playback volume ${gainText(t.volume)} (double-click for 0 dB)`;
+      pan.title = `Pan ${panText(t.pan)} (double-click to center)`;
+    };
+    vol.addEventListener('input', () => { t.volume = +vol.value; applyMix(); label(); });
+    vol.addEventListener('dblclick', () => { vol.value = 1; t.volume = 1; applyMix(); label(); });
+    pan.addEventListener('input', () => { t.pan = +pan.value; applyMix(); label(); });
+    pan.addEventListener('dblclick', () => { pan.value = 0; t.pan = 0; applyMix(); label(); });
+    label();
     const resetPeak = () => { t.clip = false; t.hold = 0; };
     el.querySelector('.meter').addEventListener('click', resetPeak);
     el.querySelector('.db').addEventListener('click', resetPeak);
@@ -160,7 +168,14 @@ function bindControls() {
   });
   $('btn-zoom-in').addEventListener('click', () => zoom(1.5));
   $('btn-zoom-out').addEventListener('click', () => zoom(1 / 1.5));
-  $('master-vol').addEventListener('input', (e) => { if (engine.master) engine.master.gain.value = +e.target.value; });
+  const master = $('master-vol');
+  const setMaster = () => {
+    if (engine.master) engine.master.gain.value = +master.value;
+    master.title = `Master playback volume ${gainText(+master.value)} (double-click for 0 dB)`;
+  };
+  master.addEventListener('input', setMaster);
+  master.addEventListener('dblclick', () => { master.value = 1; setMaster(); });
+  setMaster();
   $('timeline').addEventListener('scroll', () => (state.dirty = true));
   $('timeline-canvas').addEventListener('click', (e) => {
     if (state.recording) return;
@@ -217,6 +232,7 @@ async function openDevice() {
     const rate = +$('sel-rate').value || undefined;
     const info = await engine.open({ deviceId: $('sel-input').value, sampleRate: rate });
     state.open = true;
+    engine.master.gain.value = +$('master-vol').value; // keep master level across device changes
     $('device-info').textContent = `${info.channels} ch · ${(info.sampleRate / 1000).toFixed(1)} kHz` +
       (info.channels < MAX_CHANNELS ? ` · tracks ${info.channels + 1}–${MAX_CHANNELS} have no input` : '');
     tracks.forEach((t) => (t.hasInput = t.index < info.channels));
@@ -470,6 +486,17 @@ async function deleteClips(list) {
 function exportWavs() {
   const list = tracks.filter((t) => t.memWriter);
   list.forEach((t, i) => setTimeout(() => downloadBlob(t.memWriter.toBlob(), t.fileName), i * 300));
+}
+
+function gainText(g) {
+  if (g <= 0) return '-∞ dB';
+  const db = 20 * Math.log10(g);
+  return `${db > 0.05 ? '+' : ''}${Math.abs(db) < 0.05 ? '0.0' : db.toFixed(1)} dB`;
+}
+
+function panText(p) {
+  const n = Math.round(Math.abs(p) * 100);
+  return n === 0 ? 'center' : `${p < 0 ? 'L' : 'R'}${n}`;
 }
 
 // ---------- meters ----------
