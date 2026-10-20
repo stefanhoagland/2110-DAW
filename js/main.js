@@ -2,7 +2,8 @@ import { AudioEngine, MAX_CHANNELS } from './audio-engine.js';
 import { peaksOf } from './wav.js';
 import { DiskWriter, MemoryWriter, canUseFolders, pickFolder, downloadBlob, safeName } from './storage.js';
 import { namesFromCsv, namesToCsv } from './csv.js';
-import { LiveMixer, faderToDb, fmtDb, defaults as stripDefaults } from './live.js';
+import { LiveMixer, faderToDb, fmtDb, pluginName, defaults as stripDefaults } from './live.js';
+import { loadWamModule, knownWams, rememberWam, serverWams } from './wam.js';
 import { PLUGINS, PLUGIN_ORDER, formatParam } from './plugins.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
@@ -27,6 +28,8 @@ const state = {
   dirty: true,
   mode: 'studio',
   editing: null, // { t, k }: plugin open in the editor
+  editorGui: null, // { wam, gui }: a third-party plugin's own editor on screen
+  serverWams: [], // plugins in the server's plugins folder
 };
 
 const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
@@ -460,16 +463,14 @@ function buildStrips() {
       renderInserts(t);
     };
     const add = el.querySelector('.add-plugin');
-    for (const type of PLUGIN_ORDER) {
-      const o = document.createElement('option');
-      o.value = type;
-      o.textContent = PLUGINS[type].name;
-      add.appendChild(o);
-    }
+    fillAddMenu(add);
     add.addEventListener('change', () => {
-      if (!add.value) return;
-      const k = live.addPlugin(t.index, add.value);
+      const v = add.value;
       add.value = '';
+      if (!v) return;
+      if (v === 'wam-url') { addWamFromPrompt(t); return; }
+      if (v.startsWith('wam:')) { addWam(t, v.slice(4)); return; }
+      const k = live.addPlugin(t.index, v);
       renderInserts(t);
       openPlugin(t, k);
     });
@@ -491,14 +492,74 @@ function buildStrips() {
   refreshStripNames();
 }
 
+// The + Plugin menu: built-in plugins, then third-party Web Audio Modules.
+function fillAddMenu(sel) {
+  sel.textContent = '';
+  const opt = (value, text, parent = sel) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = text;
+    parent.appendChild(o);
+  };
+  opt('', '+ Plugin');
+  const builtIn = document.createElement('optgroup');
+  builtIn.label = 'Built-in';
+  for (const type of PLUGIN_ORDER) opt(type, PLUGINS[type].name, builtIn);
+  sel.appendChild(builtIn);
+  const third = document.createElement('optgroup');
+  third.label = 'Web Audio Modules';
+  const seen = new Set();
+  for (const w of [...state.serverWams, ...knownWams()]) {
+    if (seen.has(w.url)) continue;
+    seen.add(w.url);
+    opt(`wam:${w.url}`, w.name, third);
+  }
+  opt('wam-url', 'Load plugin from URL…', third);
+  sel.appendChild(third);
+}
+
+function refreshAddMenus() {
+  for (const t of tracks) if (t.strip) fillAddMenu(t.strip.querySelector('.add-plugin'));
+}
+
+function addWamFromPrompt(t) {
+  const url = (window.prompt('Address of a Web Audio Module plugin (its index.js):', 'https://') || '').trim();
+  if (url && url !== 'https://') addWam(t, url);
+}
+
+async function addWam(t, url) {
+  try {
+    await loadWamModule(url);
+  } catch (e) {
+    notice(`Couldn't load the plugin at ${url} (${e.message}). Check the address. Plugins on other websites only load if that site allows it (CORS); if not, copy the plugin into the plugins folder.`, true);
+    return;
+  }
+  notice('');
+  const k = live.addPlugin(t.index, 'wam', url);
+  rememberWam(url, live.params[t.index].plugins[k].name);
+  refreshAddMenus();
+  renderInserts(t);
+  openPlugin(t, k);
+}
+
+// A third-party plugin finished loading (or failed): show its name and editor.
+function onWamReady(i, pl) {
+  const t = tracks[i];
+  if (!t || !t.strip) return;
+  const known = knownWams().find((w) => w.url === pl.url);
+  if (pl.name && known && known.name !== pl.name) { rememberWam(pl.url, pl.name); refreshAddMenus(); }
+  renderInserts(t);
+  if (state.editing && state.editing.t === t && live.params[i].plugins[state.editing.k] === pl) openPlugin(t, state.editing.k);
+}
+
 function renderInserts(t) {
   const list = t.strip.querySelector('.insert-list');
   list.textContent = '';
   live.params[t.index].plugins.forEach((pl, k) => {
     const b = document.createElement('button');
     b.className = 'insert';
-    b.textContent = PLUGINS[pl.type].name;
-    b.title = `${PLUGINS[pl.type].name}${pl.bypass ? ' (bypassed)' : ''}: click to edit`;
+    b.textContent = pluginName(pl);
+    b.title = `${pluginName(pl)}${pl.bypass ? ' (bypassed)' : ''}: click to edit`;
     b.classList.toggle('bypassed', pl.bypass);
     b.classList.toggle('editing', state.editing && state.editing.t === t && state.editing.k === k);
     b.addEventListener('click', () => openPlugin(t, k));
@@ -510,14 +571,22 @@ function renderInserts(t) {
 
 function openPlugin(t, k) {
   const prev = state.editing && state.editing.t;
+  dropWamGui();
   state.editing = { t, k };
   if (prev && prev !== t) renderInserts(prev);
   renderInserts(t);
   const pl = live.params[t.index].plugins[k];
-  const def = PLUGINS[pl.type];
-  $('pp-title').textContent = `${def.name} · ${t.index + 1} ${t.name}`;
+  $('pp-title').textContent = `${pluginName(pl)} · ${t.index + 1} ${t.name}`;
   const box = $('pp-params');
   box.textContent = '';
+  $('pp-bypass').classList.toggle('on', pl.bypass);
+  $('pp-bypass').textContent = pl.bypass ? 'Bypassed' : 'Bypass';
+  $('pp-up').disabled = k === 0;
+  $('pp-down').disabled = k === live.params[t.index].plugins.length - 1;
+  $('plugin-panel').hidden = false;
+  $('plugin-panel').classList.toggle('wide', pl.type === 'wam');
+  if (pl.type === 'wam') { showWam(t, k, pl, box); return; }
+  const def = PLUGINS[pl.type];
   for (const p of def.params) {
     const row = document.createElement('label');
     row.className = 'pp-param';
@@ -539,15 +608,75 @@ function openPlugin(t, k) {
     row.append(name, inp, out);
     box.appendChild(row);
   }
-  $('pp-bypass').classList.toggle('on', pl.bypass);
-  $('pp-bypass').textContent = pl.bypass ? 'Bypassed' : 'Bypass';
-  $('pp-up').disabled = k === 0;
-  $('pp-down').disabled = k === live.params[t.index].plugins.length - 1;
-  $('plugin-panel').hidden = false;
+}
+
+function paramRow(label, min, max, step, value, fmt, onInput) {
+  const row = document.createElement('label');
+  row.className = 'pp-param';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const inp = document.createElement('input');
+  Object.assign(inp, { type: 'range', min, max, step, value });
+  const out = document.createElement('output');
+  out.textContent = fmt(value);
+  inp.addEventListener('input', () => { onInput(+inp.value); out.textContent = fmt(+inp.value); });
+  row.append(name, inp, out);
+  return row;
+}
+
+// Editor for a third-party plugin: its own interface if it has one,
+// otherwise a slider per parameter.
+async function showWam(t, k, pl, box) {
+  const msg = (text) => { const p = document.createElement('p'); p.className = 'muted pp-msg'; p.textContent = text; box.appendChild(p); };
+  const inst = live.insert(t.index, k);
+  if (!inst) { msg('Click “Enable audio” to load this plugin.'); return; }
+  if (inst.error) { msg(`This plugin didn't load: ${inst.error}`); return; }
+  if (!inst.wam) { msg('Loading plugin…'); return; } // reopened when it's ready
+  const still = () => state.editing && state.editing.t === t && state.editing.k === k;
+  const { wam } = inst;
+  let gui = null;
+  try { gui = await wam.createGui(); } catch (_) { gui = null; }
+  if (!still()) { if (gui) wam.destroyGui?.(gui); return; }
+  box.textContent = '';
+  if (gui) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pp-gui';
+    wrap.appendChild(gui);
+    box.appendChild(wrap);
+    state.editorGui = { wam, gui };
+    return;
+  }
+  let info = {};
+  let values = {};
+  try {
+    info = await wam.audioNode.getParameterInfo();
+    values = await wam.audioNode.getParameterValues(false);
+  } catch (_) { /* no parameters */ }
+  if (!still()) return;
+  const params = Object.values(info);
+  if (!params.length) { msg('This plugin has no settings to show.'); return; }
+  for (const p of params) {
+    const step = p.discreteStep || (p.maxValue - p.minValue) / 1000;
+    const v = values[p.id] ? values[p.id].value : p.defaultValue;
+    const fmt = (x) => `${Number.isInteger(step) ? Math.round(x) : x.toFixed(2)}${p.units ? ` ${p.units}` : ''}`;
+    box.appendChild(paramRow(p.label || p.id, p.minValue, p.maxValue, step, v, fmt, (x) => {
+      wam.audioNode.setParameterValues({ [p.id]: { id: p.id, value: x, normalized: false } });
+    }));
+  }
+}
+
+function dropWamGui() {
+  const g = state.editorGui;
+  state.editorGui = null;
+  if (!g) return;
+  g.gui.remove();
+  try { g.wam.destroyGui?.(g.gui); } catch (_) { /* plugin cleanup failed */ }
 }
 
 function closePlugin() {
   const t = state.editing && state.editing.t;
+  dropWamGui();
+  live.saveWamStates();
   state.editing = null;
   $('plugin-panel').hidden = true;
   if (t) renderInserts(t);
@@ -1048,13 +1177,15 @@ function frame() {
 function init() {
   loadSaved();
   buildTrackHeaders();
-  live = new LiveMixer(engine, tracks);
+  live = new LiveMixer(engine, tracks, { onPluginReady: onWamReady });
   buildStrips();
   bindControls();
   bindLive();
   bindPluginPanel();
   setMode(loadMode());
   requestAnimationFrame(frame);
+  serverWams().then((list) => { state.serverWams = list; if (list.length) refreshAddMenus(); });
+  setInterval(() => live.saveWamStates(), 5000); // third-party editors don't report changes
 
   if (!canUseFolders) {
     $('btn-folder').disabled = true;

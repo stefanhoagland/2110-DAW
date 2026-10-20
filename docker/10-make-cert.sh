@@ -3,6 +3,7 @@
 # CERT_HOSTNAMES: comma-separated names/IPs to put on the certificate,
 # for example "tower.local,192.168.1.50".
 set -e
+mkdir -p /config/plugins # third-party plugins, served at /plugins/
 dir=/config/certs
 [ -s "$dir/cert.pem" ] && [ -s "$dir/key.pem" ] && exit 0
 mkdir -p "$dir"
