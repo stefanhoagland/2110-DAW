@@ -26,6 +26,11 @@ void AudioEngine::initialise (const XmlElement* savedState)
     if (err.isNotEmpty())
         deviceManager.initialiseWithDefaultDevices (maxChannels, 2);
 
+    // First launch: the system default input is usually the built-in mic, so
+    // pick the connected interface with the most inputs instead.
+    if (savedState == nullptr)
+        selectLargestInput();
+
     // Make sure every input of the device is on (a saved setup may have fewer).
     if (auto* dev = deviceManager.getCurrentAudioDevice())
     {
@@ -39,6 +44,32 @@ void AudioEngine::initialise (const XmlElement* savedState)
             deviceManager.setAudioDeviceSetup (setup, true);
         }
     }
+}
+
+void AudioEngine::selectLargestInput()
+{
+    auto* type = deviceManager.getCurrentDeviceTypeObject();
+    if (type == nullptr)
+        return;
+    type->scanForDevices();
+    String best;
+    int bestCount = 0;
+    for (auto& name : type->getDeviceNames (true))
+    {
+        std::unique_ptr<AudioIODevice> probe (type->createDevice ({}, name));
+        const int n = probe != nullptr ? probe->getInputChannelNames().size() : 0;
+        if (n > bestCount) { best = name; bestCount = n; }
+    }
+    auto setup = deviceManager.getAudioDeviceSetup();
+    if (best.isEmpty() || best == setup.inputDeviceName)
+        return;
+    setup.inputDeviceName = best;
+    // Interfaces usually have outputs too; use the same one so the clocks match.
+    if (type->getDeviceNames (false).contains (best))
+        setup.outputDeviceName = best;
+    setup.useDefaultInputChannels = true;
+    setup.useDefaultOutputChannels = true;
+    deviceManager.setAudioDeviceSetup (setup, true);
 }
 
 String AudioEngine::deviceDescription() const
