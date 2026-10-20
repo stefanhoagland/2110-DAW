@@ -1,13 +1,16 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// Horizontal level meter with a dB scale, peak hold and clip light.
-class LevelMeter : public juce::Component
+// Horizontal level meter (like the web track meter): bar with dB ticks, peak hold,
+// clip light, and the held peak in dB on the right. Click to reset.
+class LevelMeter : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     void setLevel (float peak); // call ~30 times a second
     void mouseDown (const juce::MouseEvent&) override { clipped = false; hold = 0.0f; repaint(); }
     void paint (juce::Graphics&) override;
+
+    static constexpr int barWidth = 128, readoutWidth = 36;
 
 private:
     float level = 0.0f, hold = 0.0f;
@@ -23,7 +26,8 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
 };
 
-// One track: number, name, record arm and input meter.
+// One track header, laid out like the web version: number, name and record arm,
+// with the input meter underneath. It also keeps the waveform of the current take.
 class TrackRow : public juce::Component
 {
 public:
@@ -38,6 +42,14 @@ public:
     void focusName() { name.grabKeyboardFocus(); name.selectAll(); }
     void setLocked (bool locked) { arm.setEnabled (! locked); }
 
+    // Waveform of the current or last take: one peak per 1/wavesPerSecond s.
+    static constexpr int wavesPerSecond = 30;
+    void clearWave() { wave.clear(); inTake = false; }
+    void startWave() { wave.clear(); inTake = true; }
+    void addWave (double seconds, float peak);
+    const std::vector<float>& getWave() const { return wave; }
+    bool hasTake() const { return inTake; }
+
     std::function<void()> onChange;
     std::function<void (int direction)> onMoveFocus;
 
@@ -50,4 +62,6 @@ private:
     NameEditor name;
     juce::TextButton arm { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
     LevelMeter meter;
+    std::vector<float> wave;
+    bool inTake = false;
 };
