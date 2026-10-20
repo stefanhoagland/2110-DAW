@@ -638,8 +638,34 @@ function refreshLiveStatus() {
   $('live-status').textContent = live.on ? `Live mix is going to ${out}` : 'Live mix is off';
 }
 
+const FADER_MARKS = [10, 5, 0, -5, -10, -20, -30, -40, -60];
+const FADER_THUMB = 46; // px, keep in sync with .fader thumb height in CSS
+
+// dB scale printed beside each live fader; drawn once per size change.
+function drawFaderScale(c) {
+  if (c.clientHeight === c._drawnH) return;
+  c._drawnH = c.clientHeight;
+  const { g, w, h } = fitCanvas(c);
+  g.clearRect(0, 0, w, h);
+  g.font = '9px ui-monospace, Menlo, Consolas, monospace';
+  g.textAlign = 'right';
+  g.textBaseline = 'middle';
+  const top = FADER_THUMB / 2, travel = h - FADER_THUMB;
+  for (const db of FADER_MARKS) {
+    const y = Math.round(top + (1 - dbToFaderPos(db)) * travel) + 0.5;
+    g.fillStyle = db === 0 ? '#e6e8ee' : '#8b92a3';
+    g.fillText(db > 0 ? `+${db}` : String(db), w - 6, y);
+    g.fillRect(w - 4, y, 4, 1);
+  }
+}
+
+function dbToFaderPos(db) {
+  return (db + 60) / 70;
+}
+
 function drawLiveMeters() {
   drawPluginMeter();
+  for (const t of tracks) drawFaderScale(t.strip.querySelector('.fader-scale'));
   const now = performance.now();
   for (const t of tracks) {
     feedMeter(t.live, live.peak(t.index), now);
