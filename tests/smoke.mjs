@@ -137,6 +137,35 @@ try {
   const inserts = await page.locator('.strip').nth(0).locator('.insert').allTextContents();
   await page.click('#pp-close');
 
+  // Third-party plugins (Web Audio Modules): load a test gain plugin by URL on
+  // channel 2. Without its own editor it gets a slider per parameter.
+  page.once('dialog', (d) => d.accept('tests/fixtures/test-gain/index.js?nogui'));
+  await page.locator('.strip .add-plugin').nth(1).selectOption('wam-url');
+  await page.waitForSelector('#pp-params input', { timeout: 10000 });
+  const wamPeak = await maxPeak((d) => d.live.peak(1));
+  await page.evaluate(() => {
+    const r = document.querySelector('#pp-params input');
+    r.value = 0; r.dispatchEvent(new Event('input'));
+  });
+  await page.waitForTimeout(200);
+  const wamMuted = await maxPeak((d) => d.live.peak(1));
+  await page.click('#pp-remove');
+  // With its own editor, the plugin's interface shows in the panel.
+  page.once('dialog', (d) => d.accept('tests/fixtures/test-gain/index.js'));
+  await page.locator('.strip .add-plugin').nth(1).selectOption('wam-url');
+  await page.waitForSelector('.test-gain-gui button', { timeout: 10000 });
+  const guiPeak = await maxPeak((d) => d.live.peak(1));
+  await page.click('.test-gain-gui button');
+  await page.waitForTimeout(200);
+  const guiMuted = await maxPeak((d) => d.live.peak(1));
+  await page.click('#pp-close');
+  await page.waitForTimeout(200);
+  const wamSaved = await page.evaluate(() => JSON.parse(localStorage.getItem('daw2110.live')).strips[1].plugins.at(-1));
+  const wamMenu = await page.locator('.strip').nth(2).locator('.add-plugin option').allTextContents();
+  const wam = { wamPeak, wamMuted, guiPeak, guiMuted, state: wamSaved.state, menu: wamMenu.filter((x) => /Test Gain/.test(x)).length };
+  const wamOk = wamPeak > 0.05 && wamMuted < 0.001 && guiPeak > 0.05 && guiMuted < 0.001
+    && wamSaved.name === 'Test Gain' && wamSaved.state?.parameterValues?.gain?.value === 0 && wam.menu === 2;
+
   // Pull channel 1 and 2 faders all the way down: master should go quiet.
   await page.evaluate(() => [0, 1].forEach((i) => {
     const f = window.daw.tracks[i].strip.querySelector('.fader');
@@ -150,9 +179,9 @@ try {
     && gatedPeak < 0.01 && bypassPeak > 0.05 && /Gain reduction -\d/.test(grText) && inserts.join() === 'Gate,Compressor';
 
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, errors });
+  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, wam, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && liveOk && tabOk.join() === 'Bass,Keys,true' && diskOk
+    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && liveOk && wamOk && tabOk.join() === 'Bass,Keys,true' && diskOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {

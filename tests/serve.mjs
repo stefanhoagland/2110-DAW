@@ -1,6 +1,6 @@
 // Minimal static file server for local development: `npm start`, then open http://localhost:8110
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +11,13 @@ export function serve(port = 8110) {
   const server = http.createServer(async (req, res) => {
     const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(/^([/\\])+/, '');
     if (path.startsWith('..')) { res.writeHead(403).end(); return; }
+    if (path === 'plugins' || path === 'plugins/' || path === 'plugins\\') {
+      // Same JSON folder listing the Docker image's nginx gives for /plugins/.
+      const dirs = await readdir(join(root, 'plugins'), { withFileTypes: true }).catch(() => []);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(dirs.filter((d) => d.isDirectory()).map((d) => ({ name: d.name, type: 'directory' }))));
+      return;
+    }
     try {
       const body = await readFile(join(root, path || 'index.html'));
       res.writeHead(200, { 'content-type': types[extname(path || 'index.html')] || 'application/octet-stream' });

@@ -4,6 +4,7 @@
 // master output.
 
 import { PLUGINS, pluginDefaults } from './plugins.js';
+import { createWamInsert, nameFromUrl } from './wam.js';
 
 const STORE_KEY = 'daw2110.live';
 const FADER_MIN_DB = -60;
@@ -20,23 +21,36 @@ const defaults = () => ({
 
 let nextId = 1;
 const newPlugin = (type, values) => ({ id: nextId++, type, bypass: false, values: { ...pluginDefaults(type), ...values } });
+// A third-party Web Audio Module; `state` is the plugin's own saved settings.
+const newWam = (url, name, state = null) => ({
+  id: nextId++, type: 'wam', bypass: false, url, name: name || nameFromUrl(url), state, values: {},
+});
+const isWam = (x) => x && x.type === 'wam' && typeof x.url === 'string';
+
+export function pluginName(pl) {
+  return isWam(pl) ? pl.name : PLUGINS[pl.type].name;
+}
 
 // Settings saved before plugins existed had fixed HPF/EQ/compressor controls.
 function migrate(p) {
-  const plugins = Array.isArray(p.plugins) ? p.plugins.filter((x) => x && PLUGINS[x.type]) : [];
+  const plugins = Array.isArray(p.plugins) ? p.plugins.filter((x) => isWam(x) || (x && PLUGINS[x.type])) : [];
   if (p.hpf) plugins.push(newPlugin('hpf'));
   if (p.lo || p.mid || p.hi) plugins.push(newPlugin('eq', { loGain: p.lo || 0, midGain: p.mid || 0, hiGain: p.hi || 0 }));
   if (p.comp) plugins.push(newPlugin('comp', { threshold: -40 * p.comp, ratio: 1 + 7 * p.comp }));
   for (const k of ['hpf', 'lo', 'mid', 'hi', 'comp']) delete p[k];
-  p.plugins = plugins.map((x) => ({ ...newPlugin(x.type, x.values), bypass: !!x.bypass }));
+  p.plugins = plugins.map((x) => ({
+    ...(isWam(x) ? newWam(x.url, x.name, x.state) : newPlugin(x.type, x.values)),
+    bypass: !!x.bypass,
+  }));
   return p;
 }
 
 export class LiveMixer {
-  constructor(engine, tracks, { onChange } = {}) {
+  constructor(engine, tracks, { onChange, onPluginReady } = {}) {
     this.engine = engine;
     this.tracks = tracks;
     this.onChange = onChange || (() => {});
+    this.onPluginReady = onPluginReady || (() => {});
     this.params = tracks.map(() => defaults());
     this.on = false; // monitoring/output of the live mix
     this.chains = [];
@@ -66,6 +80,7 @@ export class LiveMixer {
   build() {
     const { ctx, source, master } = this.engine;
     if (!ctx || !source) return;
+    this.chains.forEach((c) => c.inserts.forEach((inst) => inst.dispose && inst.dispose()));
     const n = this.tracks.length;
     const split = ctx.createChannelSplitter(n);
     source.connect(split);
@@ -82,7 +97,7 @@ export class LiveMixer {
       fader.connect(pan).connect(this.bus);
       fader.connect(meter);
       const chain = { trim, fader, pan, meter, inserts: [] };
-      chain.inserts = this.params[i].plugins.map((pl) => this.instantiate(pl));
+      chain.inserts = this.params[i].plugins.map((pl) => this.instantiate(pl, i));
       return chain;
     });
     this.chains.forEach((_, i) => this.rewire(i));
@@ -129,7 +144,10 @@ export class LiveMixer {
 
   // ---------- plugin inserts ----------
 
-  instantiate(pl) {
+  instantiate(pl, i) {
+    if (pl.type === 'wam') {
+      return createWamInsert(this.engine.ctx, pl, () => { this.save(); this.onPluginReady(i, pl); });
+    }
     const inst = PLUGINS[pl.type].create(this.engine.ctx);
     for (const [k, v] of Object.entries(pl.values)) inst.set(k, v);
     return inst;
@@ -150,10 +168,10 @@ export class LiveMixer {
     node.connect(c.fader);
   }
 
-  addPlugin(i, type) {
-    const pl = newPlugin(type);
+  addPlugin(i, type, url) {
+    const pl = type === 'wam' ? newWam(url) : newPlugin(type);
     this.params[i].plugins.push(pl);
-    if (this.chains[i]) this.chains[i].inserts.push(this.instantiate(pl));
+    if (this.chains[i]) this.chains[i].inserts.push(this.instantiate(pl, i));
     this.rewire(i);
     this.save();
     return this.params[i].plugins.length - 1;
@@ -164,7 +182,7 @@ export class LiveMixer {
     const c = this.chains[i];
     if (c) {
       const [inst] = c.inserts.splice(k, 1);
-      inst.output.disconnect();
+      if (inst.dispose) inst.dispose(); else inst.output.disconnect();
     }
     this.rewire(i);
     this.save();
@@ -193,6 +211,26 @@ export class LiveMixer {
     const c = this.chains[i];
     if (c) c.inserts[k].set(key, value);
     this.save();
+  }
+
+  // The loaded insert (for a WAM: { wam, error, ready }).
+  insert(i, k) {
+    return (this.chains[i] && this.chains[i].inserts[k]) || null;
+  }
+
+  // Ask every loaded WAM for its current settings and save them; their
+  // editors change settings without telling us.
+  async saveWamStates() {
+    let changed = false;
+    await Promise.all(this.chains.flatMap((c, i) => c.inserts.map(async (inst, k) => {
+      const pl = this.params[i].plugins[k];
+      if (!inst.wam || !pl || pl.type !== 'wam') return;
+      try {
+        const st = await inst.wam.audioNode.getState();
+        if (JSON.stringify(st) !== JSON.stringify(pl.state)) { pl.state = st; changed = true; }
+      } catch (_) { /* plugin without state support */ }
+    })));
+    if (changed) this.save();
   }
 
   // Gain reduction (dB, 0 or below) of a dynamics plugin, if it has one.
