@@ -17,7 +17,7 @@ A browser-based digital audio workstation with three modes:
 - **Import names / Export names** load and save channel names as a CSV file with `Channel,Name` columns (a plain list of names, one per line, also works). Handy for keeping a channel list per show or copying it from your console's input list.
 - Click a clip to select it and press `Delete` (or the Delete button) to remove it. If it was saved to a folder, the WAV file is moved into a `Deleted` subfolder there, so it can be recovered.
 
-Keyboard: `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.
+Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channel's name (`Shift+Tab` goes back). `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.
 
 ## Running it
 

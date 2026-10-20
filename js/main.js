@@ -89,6 +89,16 @@ function buildTrackHeaders() {
     const name = el.querySelector('.name');
     name.value = t.name;
     name.addEventListener('change', () => { t.name = name.value.trim() || `Ch ${t.index + 1}`; name.value = t.name; save(); });
+    name.addEventListener('focus', () => name.select());
+    name.addEventListener('keydown', (e) => {
+      // Tab / Enter jump to the next channel name, Shift reverses.
+      if (e.key !== 'Tab' && e.key !== 'Enter') return;
+      e.preventDefault();
+      const step = e.shiftKey ? -1 : 1;
+      const next = tracks[t.index + step];
+      if (next) next.el.querySelector('.name').focus();
+      else name.blur();
+    });
 
     el.querySelector('.arm').addEventListener('click', () => {
       if (state.recording) return;
