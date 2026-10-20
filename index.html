@@ -11,7 +11,7 @@
     <div class="brand">2110 <span>DAW</span></div>
 
     <nav class="modes" aria-label="Mode">
-      <button class="mode" data-mode="live" disabled title="Coming in a later step">Live</button>
+      <button class="mode" data-mode="live">Live</button>
       <button class="mode active" data-mode="studio">Studio</button>
       <button class="mode" data-mode="soundcheck" disabled title="Coming in a later step">Soundcheck</button>
     </nav>
@@ -61,7 +61,7 @@
 
   <div id="notice" class="notice" hidden></div>
 
-  <section class="toolbar">
+  <section class="toolbar studio-only">
     <button id="btn-arm-all">Arm all</button>
     <button id="btn-arm-none">Disarm all</button>
     <button id="btn-names-import" title="Load channel names from a CSV file (Channel, Name)">Import names</button>
@@ -75,7 +75,7 @@
     <button id="btn-zoom-in" aria-label="Zoom in">+</button>
   </section>
 
-  <main class="tracks-area" id="tracks-area">
+  <main class="tracks-area studio-only" id="tracks-area">
     <div class="headers" id="headers">
       <div class="ruler-spacer"><span>Tracks</span></div>
     </div>
@@ -85,6 +85,41 @@
       </div>
     </div>
   </main>
+
+  <section id="live-view" class="live-view live-only" hidden>
+    <div class="live-bar">
+      <button id="btn-live" class="go-live" title="Send the live mix to the output">Go live</button>
+      <span id="live-status" class="muted">Live mix is off</span>
+      <label>Output <select id="sel-output" disabled><option value="">Default output</option></select></label>
+      <label class="check"><input type="checkbox" id="chk-limiter"> Master limiter</label>
+      <span id="live-latency" class="muted"></span>
+      <span class="spacer"></span>
+      <span class="muted">Double-click a control to reset it</span>
+    </div>
+    <div class="console" id="console"></div>
+  </section>
+
+  <template id="strip-template">
+    <div class="strip">
+      <div class="strip-head"><span class="strip-num"></span><span class="strip-name"></span></div>
+      <div class="knob"><div class="knob-top"><span>Gain</span><output></output></div><input type="range" data-key="trim" min="-20" max="20" step="0.5"></div>
+      <button class="hpf" data-key="hpf" title="High-pass filter at 80 Hz">HPF 80</button>
+      <div class="knob"><div class="knob-top"><span>Hi</span><output></output></div><input type="range" data-key="hi" min="-15" max="15" step="0.5"></div>
+      <div class="knob"><div class="knob-top"><span>Mid</span><output></output></div><input type="range" data-key="mid" min="-15" max="15" step="0.5"></div>
+      <div class="knob"><div class="knob-top"><span>Lo</span><output></output></div><input type="range" data-key="lo" min="-15" max="15" step="0.5"></div>
+      <div class="knob"><div class="knob-top"><span>Comp</span><output></output></div><input type="range" data-key="comp" min="0" max="1" step="0.01"></div>
+      <div class="knob"><div class="knob-top"><span>Pan</span><output></output></div><input type="range" data-key="pan" min="-1" max="1" step="0.01"></div>
+      <div class="fader-area">
+        <canvas class="vmeter" aria-hidden="true"></canvas>
+        <input type="range" class="fader" data-key="fader" min="0" max="1" step="0.001" aria-label="Fader">
+      </div>
+      <output class="fader-db">0.0</output>
+      <div class="strip-btns">
+        <button class="mute" data-key="mute" title="Mute">M</button>
+        <button class="solo" data-key="solo" title="Solo">S</button>
+      </div>
+    </div>
+  </template>
 
   <template id="track-template">
     <div class="track-header">
