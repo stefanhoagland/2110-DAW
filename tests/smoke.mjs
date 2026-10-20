@@ -69,7 +69,7 @@ try {
     return { root: await list(root), deleted };
   });
   const diskOk = disk && files.deleted.length === 1 && files.deleted[0].startsWith('T02_02_')
-    && files.root.filter((n) => n.startsWith('T02_')).length === 15;
+    && files.root.filter((n) => n.startsWith('T02_')).length === 31;
 
   // Tab from one channel name to the next while typing.
   await page.locator('.track-header .name').nth(3).click(); // track 4
@@ -100,7 +100,7 @@ try {
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
   console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && namesOk && tipsOk && tabOk.join() === 'Bass,Keys,true' && diskOk
+    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && tabOk.join() === 'Bass,Keys,true' && diskOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {

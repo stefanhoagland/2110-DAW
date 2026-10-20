@@ -239,7 +239,7 @@ async function openDevice() {
     refreshAll();
     if (info.channels < MAX_CHANNELS) {
       notice(`This input gives the browser ${info.channels} channel${info.channels === 1 ? '' : 's'}, so tracks ${info.channels + 1}–${MAX_CHANNELS} will record silence. ` +
-        'For 16 channels, use Chrome with an interface that appears as one 16-channel device (see README).');
+        `For all ${MAX_CHANNELS} channels, use Chrome with an interface that appears as one multichannel device (see README).`);
     } else {
       notice('');
     }
