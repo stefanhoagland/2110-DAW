@@ -79,6 +79,17 @@ try {
   await page.keyboard.press('Shift+Tab');
   const tabOk = await page.evaluate(() => [window.daw.tracks[3].name, window.daw.tracks[4].name, document.activeElement === window.daw.tracks[3].el.querySelector('.name')]);
 
+  // Volume and pan tooltips show values.
+  const tips = await page.evaluate(() => {
+    const el = window.daw.tracks[0].el;
+    const vol = el.querySelector('.vol');
+    vol.value = 0.5; vol.dispatchEvent(new Event('input'));
+    const pan = el.querySelector('.pan');
+    pan.value = -0.3; pan.dispatchEvent(new Event('input'));
+    return [vol.title, pan.title];
+  });
+  const tipsOk = tips[0].startsWith('Playback volume -6.0 dB') && tips[1].startsWith('Pan L30');
+
   // Import channel names from CSV, then export them again.
   await page.setInputFiles('#names-file', { name: 'names.csv', mimeType: 'text/csv', buffer: Buffer.from('Channel,Name\n1,Kick\n3,"Snare, top"\n') });
   await page.waitForFunction(() => window.daw.tracks[2].name === 'Snare, top', null, { timeout: 5000 });
@@ -87,9 +98,9 @@ try {
   const namesOk = exported.startsWith('Channel,Name\r\n1,Kick\r\n2,Ch 2\r\n3,"Snare, top"');
 
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, afterDelete, namesOk, tabOk, errors });
+  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && namesOk && tabOk.join() === 'Bass,Keys,true' && diskOk
+    && result.recordedTracks === 16 && result.exportEnabled && playing && afterDelete === 15 && firstGone && namesOk && tipsOk && tabOk.join() === 'Bass,Keys,true' && diskOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {
