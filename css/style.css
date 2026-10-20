@@ -113,7 +113,31 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
   background: var(--panel);
   z-index: 1;
 }
-.ruler-spacer input { flex: 1; }
+.master-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #0c0d10;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.master-top { display: flex; align-items: center; gap: 8px; }
+.master-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.master-top input { flex: 1; min-width: 0; }
+.master-meter { display: flex; align-items: center; gap: 8px; }
+#master-meter { width: 260px; height: 34px; display: block; cursor: pointer; }
+.master-db {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 34px;
+  width: 40px;
+  text-align: right;
+  font: 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--muted);
+}
+.master-db .clip { color: var(--rec); font-weight: 700; }
 
 .track-header {
   height: var(--row-h);
@@ -159,6 +183,8 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
 @media (max-width: 760px) {
   :root { --header-w: 230px; }
   .topbar { flex-wrap: wrap; gap: 10px; }
+  .master-strip { width: 100%; }
+  #master-meter { width: auto; flex: 1; min-width: 0; }
   .track-header .meter { width: 70px; }
   .track-header .pan { display: none; }
 }

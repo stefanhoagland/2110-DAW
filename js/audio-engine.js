@@ -68,6 +68,16 @@ export class AudioEngine extends EventTarget {
 
     this.master = this.ctx.createGain();
     this.master.connect(this.ctx.destination);
+    // Taps for the master meter (left and right of the playback mix).
+    const split = this.ctx.createChannelSplitter(2);
+    this.master.connect(split);
+    this.masterTaps = [0, 1].map((ch) => {
+      const a = this.ctx.createAnalyser();
+      a.fftSize = 2048;
+      split.connect(a, ch);
+      return a;
+    });
+    this.tapBuf = new Float32Array(2048);
     await this.ctx.resume();
     return { channels: this.deviceChannels, sampleRate: this.ctx.sampleRate, label: this.stream.getAudioTracks()[0].label };
   }
@@ -76,7 +86,7 @@ export class AudioEngine extends EventTarget {
     this.stopPlayback();
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     if (this.ctx) await this.ctx.close();
-    this.ctx = this.stream = this.source = this.recorder = this.master = null;
+    this.ctx = this.stream = this.source = this.recorder = this.master = this.masterTaps = null;
   }
 
   startRecording(armed) {
@@ -135,6 +145,20 @@ export class AudioEngine extends EventTarget {
   get playPosition() {
     if (!this.playing) return this.playStartOffset;
     return this.playStartOffset + Math.max(0, this.ctx.currentTime - this.playStartCtxTime);
+  }
+
+  // Peak level of the last ~40 ms of the master output, [left, right].
+  masterPeaks() {
+    if (!this.masterTaps) return [0, 0];
+    return this.masterTaps.map((a) => {
+      a.getFloatTimeDomainData(this.tapBuf);
+      let m = 0;
+      for (let i = 0; i < this.tapBuf.length; i++) {
+        const v = this.tapBuf[i] < 0 ? -this.tapBuf[i] : this.tapBuf[i];
+        if (v > m) m = v;
+      }
+      return m;
+    });
   }
 
   decode(arrayBuffer) {
