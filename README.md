@@ -6,6 +6,8 @@ A browser-based digital audio workstation with three modes:
 - **Soundcheck** (planned): play recorded tracks back out to separate outputs on your interface so each lands on its own console channel for a virtual soundcheck.
 - **Live**: a mixing console for the live inputs, with EQ, compression and a stereo mix you can send to your streaming software.
 
+**Mac app:** a native version (no browser limits) is being built in [`mac/`](mac/README.md); download it from the [mac-latest release](https://github.com/stefanhoagland/2110-DAW/releases/tag/mac-latest).
+
 ## What works today: 32-channel recorder
 
 - Pick your audio interface and sample rate.

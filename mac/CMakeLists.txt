@@ -1,0 +1,56 @@
+# 2110 DAW for macOS: a native multitrack recorder and live console built with JUCE.
+# Build:  cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+cmake_minimum_required(VERSION 3.22)
+
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS version supported")
+project(DAW2110 VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+FetchContent_Declare(JUCE
+  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+  GIT_TAG 8.0.9
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(JUCE)
+
+juce_add_gui_app(DAW2110
+  PRODUCT_NAME "2110 DAW"
+  COMPANY_NAME "2110"
+  BUNDLE_ID "com.stefanhoagland.daw2110"
+  VERSION ${PROJECT_VERSION}
+  MICROPHONE_PERMISSION_ENABLED TRUE
+  MICROPHONE_PERMISSION_TEXT "2110 DAW records and mixes the inputs of your audio interface.")
+
+target_sources(DAW2110 PRIVATE
+  Source/Main.cpp
+  Source/AudioEngine.cpp
+  Source/MainComponent.cpp
+  Source/TrackRow.cpp
+  Source/Names.cpp)
+
+target_compile_definitions(DAW2110 PRIVATE
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_PRODUCT_NAME>"
+  JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_VERSION>")
+
+target_link_libraries(DAW2110 PRIVATE
+  juce::juce_audio_utils
+  juce::juce_audio_devices
+  juce::juce_audio_formats
+  juce::juce_gui_extra
+  juce::juce_recommended_config_flags
+  juce::juce_recommended_lto_flags
+  juce::juce_recommended_warning_flags)
+
+# Small checks of the non-audio logic (channel-name CSV, file names).
+add_executable(NamesTest Source/Names.cpp Tests/NamesTest.cpp)
+target_link_libraries(NamesTest PRIVATE juce::juce_core juce::juce_recommended_config_flags)
+target_compile_definitions(NamesTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
+
+add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Tests/EngineTest.cpp)
+target_link_libraries(EngineTest PRIVATE juce::juce_audio_devices juce::juce_audio_formats juce::juce_events
+  juce::juce_recommended_config_flags)
+target_compile_definitions(EngineTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
