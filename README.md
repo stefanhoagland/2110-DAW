@@ -1,6 +1,6 @@
-# 2110 DAW
+# Soundbending Live
 
-A browser-based digital audio workstation with three modes:
+(Formerly 2110 DAW.) A browser-based digital audio workstation with three modes:
 
 - **Studio**: multitrack recording now; effects and mixdown for post production next.
 - **Soundcheck** (planned): play recorded tracks back out to separate outputs on your interface so each lands on its own console channel for a virtual soundcheck.

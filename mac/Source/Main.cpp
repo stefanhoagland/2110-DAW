@@ -12,10 +12,19 @@ public:
     void initialise (const juce::String&) override
     {
         juce::PropertiesFile::Options o;
-        o.applicationName = "2110 DAW";
+        o.applicationName = "Soundbending Live";
         o.filenameSuffix = ".settings";
-        o.folderName = "2110 DAW";
+        o.folderName = "Soundbending Live";
         o.osxLibrarySubFolder = "Application Support";
+        // Bring settings over from before the app was renamed (it was "2110 DAW").
+        auto newFile = o.getDefaultFile();
+        auto old = o;
+        old.applicationName = old.folderName = "2110 DAW";
+        if (! newFile.existsAsFile() && old.getDefaultFile().existsAsFile())
+        {
+            newFile.getParentDirectory().createDirectory();
+            old.getDefaultFile().copyFileTo (newFile);
+        }
         properties.setStorageParameters (o);
 
         auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();

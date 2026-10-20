@@ -1,4 +1,4 @@
-# 2110 DAW: static web app served by nginx over HTTP and HTTPS.
+# Soundbending Live: static web app served by nginx over HTTP and HTTPS.
 # Browsers only allow audio-interface access on HTTPS (or localhost), so the
 # container creates a self-signed certificate on first start if none is provided.
 

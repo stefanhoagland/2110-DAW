@@ -1,4 +1,4 @@
-# 2110 DAW for macOS: a native multitrack recorder and live console built with JUCE.
+# Soundbending Live for macOS: a native multitrack recorder and live console built with JUCE.
 # Build:  cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
 cmake_minimum_required(VERSION 3.22)
 
@@ -16,12 +16,12 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 
 juce_add_gui_app(DAW2110
-  PRODUCT_NAME "2110 DAW"
+  PRODUCT_NAME "Soundbending Live"
   COMPANY_NAME "2110"
   BUNDLE_ID "com.stefanhoagland.daw2110"
   VERSION ${PROJECT_VERSION}
   MICROPHONE_PERMISSION_ENABLED TRUE
-  MICROPHONE_PERMISSION_TEXT "2110 DAW records and mixes the inputs of your audio interface.")
+  MICROPHONE_PERMISSION_TEXT "Soundbending Live records and mixes the inputs of your audio interface.")
 
 target_sources(DAW2110 PRIVATE
   Source/Main.cpp
