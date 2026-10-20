@@ -50,7 +50,7 @@ private:
     void selectLargestInput();
 
     juce::AudioDeviceManager deviceManager;
-    juce::TimeSliceThread writerThread { "2110 DAW disk writer" };
+    juce::TimeSliceThread writerThread { "Soundbending Live disk writer" };
 
     std::array<std::atomic<float>, maxChannels> peaks {};
     std::array<int, maxChannels> activeToChannel {}; // callback input index -> device channel

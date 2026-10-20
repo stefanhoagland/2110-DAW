@@ -8,7 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/stefanhoagland/2110-DAW</Support>
   <Project>https://github.com/stefanhoagland/2110-DAW</Project>
-  <Overview>Browser-based DAW with Live, Studio and Soundcheck modes. Open the HTTPS port in Chrome; browsers only allow audio interfaces on HTTPS.</Overview>
+  <Overview>Soundbending Live (formerly 2110 DAW): browser-based DAW with Live, Studio and Soundcheck modes. Open the HTTPS port in Chrome; browsers only allow audio interfaces on HTTPS.</Overview>
   <Category>MediaApp:Music</Category>
   <WebUI>https://[IP]:[PORT:443]/</WebUI>
   <Config Name="HTTPS port" Target="443" Default="8443" Mode="tcp" Description="Open this one in Chrome: https://your-server-ip:8443" Type="Port" Display="always" Required="true" Mask="false">8443</Config>

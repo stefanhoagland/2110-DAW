@@ -12,8 +12,8 @@ static constexpr int defaultTracks = 32; // shown when no device is open
 
 MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 {
-    title.setText ("2110 DAW", dontSendNotification);
-    title.setFont (FontOptions (20.0f, Font::bold));
+    title.setText ("Soundbending Live", dontSendNotification);
+    title.setFont (FontOptions (19.0f, Font::bold));
     addAndMakeVisible (title);
 
     for (auto* l : { &deviceInfo, &folderInfo, &status })
@@ -43,8 +43,11 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
-    folder = File (settings.getValue ("folder",
-        File::getSpecialLocation (File::userMusicDirectory).getChildFile ("2110 DAW").getFullPathName()));
+    // Default save folder; keeps using the folder from before the rename if it exists.
+    auto music = File::getSpecialLocation (File::userMusicDirectory);
+    auto defaultFolder = music.getChildFile ("2110 DAW").isDirectory() ? music.getChildFile ("2110 DAW")
+                                                                       : music.getChildFile ("Soundbending Live");
+    folder = File (settings.getValue ("folder", defaultFolder.getFullPathName()));
     take = nextTakeNumber() - 1;
 
     auto deviceXml = settings.getXmlValue ("audioDevice");
@@ -78,7 +81,7 @@ void MainComponent::resized()
     auto top = r.removeFromTop (112).reduced (14, 10);
 
     auto row1 = top.removeFromTop (36);
-    title.setBounds (row1.removeFromLeft (130));
+    title.setBounds (row1.removeFromLeft (190));
     recordButton.setBounds (row1.removeFromRight (110));
     row1.removeFromRight (10);
     clock.setBounds (row1.removeFromRight (150));
