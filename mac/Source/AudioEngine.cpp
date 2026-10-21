@@ -14,6 +14,7 @@ AudioEngine::AudioEngine()
 
 AudioEngine::~AudioEngine()
 {
+    mtcInput.reset();
     stopRecording();
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
@@ -117,6 +118,7 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
     inputCount = jmin (maxChannels, dev->getInputChannelNames().size());
     outputCount = jmin (maxChannels, dev->getOutputChannelNames().size());
     currentRate = dev->getCurrentSampleRate();
+    ltcReset = true;
 
     const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
     work.setSize (1, block, false, true, false);
@@ -166,6 +168,32 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
                                                     float* const* outputs, int numOuts, int numSamples,
                                                     const AudioIODeviceCallbackContext&)
 {
+    // Timecode: note where this block sits in time, and read LTC if that's the source.
+    const double rate = currentRate.load (std::memory_order_relaxed);
+    Anchor tcNow;
+    {
+        const SpinLock::ScopedTryLockType lock (tcLock);
+        if (lock.isLocked())
+        {
+            clockSample = samplePos;
+            clockMs = Time::getMillisecondCounterHiRes();
+            tcNow = anchor;
+        }
+    }
+    if (tcMode.load (std::memory_order_relaxed) == 1)
+    {
+        if (ltcReset.exchange (false)) ltc.reset (rate);
+        const int src = ltcInput.load (std::memory_order_relaxed);
+        const int idx = isPositiveAndBelow (src, maxChannels) ? channelToActive[(size_t) src] : -1;
+        if (isPositiveAndBelow (idx, numIns) && inputs[idx] != nullptr
+            && ltc.process (inputs[idx], numSamples, samplePos))
+        {
+            const SpinLock::ScopedTryLockType lock (tcLock);
+            if (lock.isLocked())
+                anchor = { (double) ltc.lastFrame + 1.0, ltc.lastFrameEnd, ltc.rate, true };
+        }
+    }
+
     // Patch: find each track's input.
     const int tracks = jmin (inputCount.load (std::memory_order_relaxed), maxChannels);
     for (int t = 0; t < tracks; ++t)
@@ -207,11 +235,20 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
                     lost = true;
             }
             if (lost) ++dropped;
+            if (samplesRecorded.load (std::memory_order_relaxed) == 0 && tcNow.valid && rate > 0.0
+                && std::abs ((double) (samplePos - tcNow.sample)) < 0.5 * rate)
+            {
+                // The take's first sample, in timecode.
+                takeTcFrames = tcNow.frames + (double) (samplePos - tcNow.sample) / rate * tcNow.rate.fps;
+                takeTcRate = tcNow.rate;
+                takeTcValid.store (true, std::memory_order_release);
+            }
             samplesRecorded += numSamples;
         }
     }
 
     mixLive (tracks, outputs, numOuts, numSamples);
+    samplePos += numSamples;
 }
 
 static void storeMax (std::atomic<float>& slot, float p)
@@ -356,6 +393,20 @@ String AudioEngine::startRecording (const File& folder, int take, const std::vec
     if (! folder.createDirectory())
         return "Can't create the folder " + folder.getFullPathName();
 
+    // With timecode locked, files are Broadcast WAVs stamped with the start time. The value
+    // here is an estimate; stopRecording() writes the exact time of the first sample.
+    std::unordered_map<String, String> bext;
+    const auto now = timecodeNow();
+    if (now.locked)
+    {
+        const auto t = Time::getCurrentTime();
+        bext[WavAudioFormat::bwavDescription] = "sTC=" + tc::toLabel (now.frames, now.rate) + " fps=" + now.rate.shortName();
+        bext[WavAudioFormat::bwavOriginator] = "Soundbending Live";
+        bext[WavAudioFormat::bwavOriginationDate] = t.formatted ("%Y-%m-%d");
+        bext[WavAudioFormat::bwavOriginationTime] = t.formatted ("%H:%M:%S");
+        bext[WavAudioFormat::bwavTimeReference] = String (tc::toSamples (now.frames, now.rate, rate));
+    }
+
     WavAudioFormat wav;
     std::vector<std::unique_ptr<AudioFormatWriter::ThreadedWriter>> next ((size_t) maxChannels);
     StringArray files;
@@ -369,7 +420,7 @@ String AudioEngine::startRecording (const File& folder, int take, const std::vec
         if (! static_cast<FileOutputStream*> (stream.get())->openedOk())
             return "Can't write " + file.getFullPathName();
 
-        auto opts = AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24);
+        auto opts = AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24).withMetadataValues (bext);
         auto writer = wav.createWriterFor (stream, opts);
         if (writer == nullptr)
             return "Can't create a WAV file at " + String (rate) + " Hz.";
@@ -384,6 +435,8 @@ String AudioEngine::startRecording (const File& folder, int take, const std::vec
         dropped = 0;
         takeFiles = files;
     }
+    takeTcValid = false;
+    takeSampleRate = rate;
     recording = true;
     return {};
 }
@@ -396,7 +449,133 @@ void AudioEngine::stopRecording()
         const SpinLock::ScopedLockType lock (writersLock);
         old.swap (writers);
     }
+    const bool hadWriters = ! old.empty();
     old.clear(); // each ThreadedWriter flushes its buffer and closes its file here
+    if (hadWriters && takeTcValid.load (std::memory_order_acquire))
+        stampTake();
+}
+
+void AudioEngine::stampTake()
+{
+    const auto label = tc::toLabel (takeTcFrames, takeTcRate);
+    const auto ref = tc::toSamples (takeTcFrames, takeTcRate, takeSampleRate);
+    for (auto& path : takeFiles)
+        stampBext (File (path), ref, "sTC=" + label + " fps=" + takeTcRate.shortName());
+}
+
+bool AudioEngine::stampBext (const File& wav, int64 timeReference, const String& description)
+{
+    // Find the bext chunk, then overwrite its Description (256 bytes) and TimeReference
+    // (64-bit little-endian at byte 338).
+    int64 bextData = -1;
+    {
+        FileInputStream in (wav);
+        if (! in.openedOk() || in.readInt() != (int) ByteOrder::littleEndianInt ("RIFF")) return false;
+        in.readInt();
+        if (in.readInt() != (int) ByteOrder::littleEndianInt ("WAVE")) return false;
+        while (! in.isExhausted())
+        {
+            const int id = in.readInt();
+            const auto size = (int64) (uint32) in.readInt();
+            if (id == (int) ByteOrder::littleEndianInt ("bext")) { bextData = in.getPosition(); break; }
+            in.setPosition (in.getPosition() + size + (size & 1));
+        }
+    }
+    if (bextData < 0) return false;
+    FileOutputStream out (wav); // opens without truncating
+    if (! out.openedOk()) return false;
+    char text[256] = {};
+    description.copyToUTF8 (text, sizeof (text) - 1);
+    out.setPosition (bextData);
+    out.write (text, sizeof (text));
+    out.setPosition (bextData + 338);
+    out.writeInt64 (timeReference); // little-endian
+    out.flush();
+    return ! out.getStatus().failed();
+}
+
+void AudioEngine::setTimecodeOff()
+{
+    tcMode = 0;
+    mtcInput.reset();
+    const SpinLock::ScopedLockType lock (tcLock);
+    anchor.valid = false;
+}
+
+void AudioEngine::setTimecodeLtc (int deviceInput)
+{
+    mtcInput.reset();
+    ltcInput = deviceInput;
+    ltcReset = true;
+    {
+        const SpinLock::ScopedLockType lock (tcLock);
+        anchor.valid = false;
+    }
+    tcMode = 1;
+}
+
+bool AudioEngine::setTimecodeMtc (const String& id)
+{
+    setTimecodeOff();
+    mtcInput = MidiInput::openDevice (id, this);
+    if (mtcInput == nullptr) return false;
+    tcMode = 2;
+    mtcInput->start();
+    return true;
+}
+
+void AudioEngine::handleIncomingMidiMessage (MidiInput*, const MidiMessage& m)
+{
+    if (tcMode.load() != 2) return;
+    bool done = false;
+    if (m.isQuarterFrame())
+        done = mtc.quarterFrame (m.getQuarterFrameSequenceNumber(), m.getQuarterFrameValue());
+    else if (m.isFullFrame())
+    {
+        int h = 0, mi = 0, s = 0, f = 0;
+        MidiMessage::SmpteTimecodeType type;
+        m.getFullFrameParameters (h, mi, s, f, type);
+        done = mtc.fullFrame (h, mi, s, f, (int) type);
+    }
+    if (! done) return;
+    const double rate = currentRate.load();
+    const SpinLock::ScopedLockType lock (tcLock);
+    // MIDI timestamps are on the same high-resolution clock as clockMs.
+    const auto at = clockSample + (int64) std::llround ((m.getTimeStamp() * 1000.0 - clockMs) * rate / 1000.0);
+    anchor = { (double) mtc.frames, at, mtc.rate, true };
+}
+
+AudioEngine::TimecodeNow AudioEngine::timecodeNow() const
+{
+    TimecodeNow t;
+    t.active = tcMode.load() != 0;
+    Anchor a;
+    int64 cs; double cm;
+    {
+        const SpinLock::ScopedLockType lock (tcLock);
+        a = anchor; cs = clockSample; cm = clockMs;
+    }
+    const double rate = currentRate.load();
+    if (! t.active || ! a.valid || rate <= 0.0) return t;
+    const double now = (double) cs + (Time::getMillisecondCounterHiRes() - cm) * rate / 1000.0;
+    const double dt = (now - (double) a.sample) / rate;
+    t.seen = true;
+    t.locked = dt > -0.5 && dt < 0.5;
+    t.frames = a.frames + dt * a.rate.fps;
+    t.rate = a.rate;
+    return t;
+}
+
+AudioEngine::TimecodeNow AudioEngine::takeTimecode() const
+{
+    TimecodeNow t;
+    if (takeTcValid.load (std::memory_order_acquire))
+    {
+        t.active = t.seen = t.locked = true;
+        t.frames = takeTcFrames;
+        t.rate = takeTcRate;
+    }
+    return t;
 }
 
 double AudioEngine::recordedSeconds() const

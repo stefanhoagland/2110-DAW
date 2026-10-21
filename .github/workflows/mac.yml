@@ -22,9 +22,10 @@ jobs:
 
       - name: Tests
         run: |
-          cmake --build build --target NamesTest EngineTest -j 4
+          cmake --build build --target NamesTest EngineTest TimecodeTest -j 4
           ./build/NamesTest
           ./build/EngineTest
+          ./build/TimecodeTest
 
       - name: Build app
         run: cmake --build build --target DAW2110 -j 4

@@ -1,6 +1,7 @@
 // Records through the real AudioEngine with a pretend interface and checks
 // the WAV files it writes. Run: ./EngineTest
 #include "../Source/AudioEngine.h"
+#include "LtcSignal.h"
 #include <iostream>
 
 using namespace juce;
@@ -232,6 +233,49 @@ int main()
     engine.removeInsert (0, 0);
     auto [b4, b4r] = run (4);
     check (engine.getInserts (0).empty() && std::abs (b4 - b0) < 0.01f, "removing plugins restores the dry level");
+
+    // ---- Timecode ----
+    {
+        // Without timecode, takes are plain WAVs (no bext chunk).
+        auto plain = std::unique_ptr<AudioFormatReader> (wav.createReaderFor (kick.createInputStream().release(), true));
+        check (plain != nullptr && ! plain->metadataValues.containsKey (WavAudioFormat::bwavTimeReference), "no timecode: no BWF stamp");
+
+        // 25 fps LTC from 10:00:00:00 on input 10.
+        LtcSignal sig { 25, false, 25.0 };
+        auto ltcAudio = sig.make (10, 0, 0, 0, 4.0, 48000.0);
+        engine.setTimecodeLtc (9);
+        size_t at = 0;
+        auto feed = [&] (int count)
+        {
+            for (int b = 0; b < count && at + block <= ltcAudio.size(); ++b, at += block)
+            {
+                for (int i = 0; i < block; ++i) { in.setSample (9, i, ltcAudio[at + (size_t) i]); in.setSample (0, i, 0.1f); }
+                engine.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), 64, out.getArrayOfWritePointers(), 8, block, ctx);
+            }
+        };
+        feed (48000 / block); // about a second to lock
+        auto now = engine.timecodeNow();
+        check (now.locked && now.rate.nominal == 25, "LTC locks at 25 fps");
+        // Here `at` samples of LTC have gone by since 10:00:00:00.
+        const double expectFrames = 900000.0 + (double) at / 48000.0 * 25.0;
+        check (std::abs (now.frames - expectFrames) < 1.0, "clock reads " + tc::toLabel (now.frames, now.rate));
+
+        const auto first = (int64) at;
+        check (engine.startRecording (dir, 20, { { 0, "Kick" } }).isEmpty(), "record with timecode");
+        feed (40);
+        engine.stopRecording();
+        check (engine.takeTimecode().seen, "take has a start timecode");
+        std::unique_ptr<AudioFormatReader> tr (wav.createReaderFor (dir.getChildFile ("T20_01_Kick.wav").createInputStream().release(), true));
+        const auto ref = tr != nullptr ? tr->metadataValues.getValue (WavAudioFormat::bwavTimeReference, "-1").getLargeIntValue() : -1;
+        const int64 expectRef = (int64) 10 * 3600 * 48000 + first;
+        check (std::abs (ref - expectRef) <= 2, "BWF time reference is the first sample (" + String (ref) + " vs " + String (expectRef) + ")");
+        check (tr != nullptr && tr->metadataValues.getValue (WavAudioFormat::bwavDescription, {}) == "sTC=10:00:00:24 fps=25",
+               "BWF description has the start timecode: " + (tr != nullptr ? tr->metadataValues.getValue (WavAudioFormat::bwavDescription, {}) : String()));
+        check (tr != nullptr && tr->lengthInSamples == 40 * block, "stamped file still has all its audio");
+
+        engine.setTimecodeOff();
+        check (! engine.timecodeNow().active, "timecode off");
+    }
 
     dir.deleteRecursively();
     std::cout << (failures ? "FAILED\n" : "ALL PASSED\n");

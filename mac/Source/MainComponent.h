@@ -41,6 +41,9 @@ private:
     enum Mode { studioMode, liveMode, patchMode };
     void setMode (Mode);
     void savePatch();
+    void showTimecodeMenu();
+    void applyTimecode (const juce::String& setting, bool save);
+    void updateClock (bool rec, double secs);
     void saveLive();
     juce::StringArray trackNames() const;
     int nextTakeNumber() const;
@@ -54,11 +57,12 @@ private:
 
     WebLook look;
     std::unique_ptr<juce::Drawable> logo;
-    juce::Label deviceInfo, folderInfo, clock, takeInfo, notice;
+    juce::Label deviceInfo, folderInfo, clock, takeInfo, notice, tcInfo;
+    juce::String tcSetting { "off" };
     juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" }, patchTab { "Patch" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },
                      playButton { juce::CharPointer_UTF8 ("\xe2\x96\xb6") }, recordButton { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
-    juce::TextButton audioButton { "Audio settings" }, folderButton { "Choose save folder" },
+    juce::TextButton audioButton { "Audio settings" }, timecodeButton { "Timecode: Off" }, folderButton { "Choose save folder" },
                      armAll { "Arm all" }, disarmAll { "Disarm all" },
                      importButton { "Import names" }, exportButton { "Export names" },
                      zoomOut { juce::CharPointer_UTF8 ("\xe2\x88\x92") }, zoomIn { "+" };

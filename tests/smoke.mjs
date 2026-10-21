@@ -97,6 +97,80 @@ try {
   const exported = (await (await download.createReadStream()).toArray()).join('');
   const namesOk = exported.startsWith('Channel,Name\r\n1,Kick\r\n2,Ch 2\r\n3,"Snare, top"');
 
+  // Timecode: with no signal the clock says so; then play a generated LTC
+  // signal (01:00:00:00 at 25 fps) into input 6, check the clock locks, record
+  // a take and check its WAVs carry a matching Broadcast Wave stamp.
+  const tcOptions = await page.locator('#sel-tc option').count();
+  await page.selectOption('#sel-tc', 'ltc:5');
+  await page.waitForTimeout(800);
+  const tcNoSignal = { clock: await page.textContent('#clock'), status: await page.textContent('#tc-status') };
+  const tcLtc = await page.evaluate(async () => {
+    const { encodeLtc, RATES } = await import('./js/timecode.js');
+    const { engine } = window.daw;
+    const ctx = engine.ctx;
+    const data = encodeLtc({ rate: RATES['25'], start: { h: 1, m: 0, s: 0, f: 0 }, seconds: 8, sampleRate: ctx.sampleRate, noise: 0 });
+    const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
+    buf.copyToChannel(data, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const merger = ctx.createChannelMerger(32);
+    src.connect(merger, 0, 5);
+    merger.connect(engine.recorder);
+    const when = Math.ceil((ctx.currentTime + 0.1) * ctx.sampleRate) / ctx.sampleRate;
+    src.start(when);
+    window.tcTest = { src, merger, startFrame: Math.round(when * ctx.sampleRate) };
+    engine.addEventListener('started', (e) => (window.tcTest.recStart = e.detail.frame), { once: true });
+    return true;
+  });
+  await page.waitForFunction(() => window.daw.tc.locked, null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const tcLocked = { clock: await page.textContent('#clock'), status: await page.textContent('#tc-status') };
+  await page.keyboard.press('r');
+  await page.waitForTimeout(1000);
+  const tcTakeInfo = await page.textContent('#take-info');
+  await page.click('#btn-stop');
+  await page.waitForFunction(() => window.daw.state.take === 3 && !window.daw.state.saving && window.daw.tracks[0].buffer, null, { timeout: 10000 });
+  const bwf = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    let file = null;
+    for await (const [n, h] of root.entries()) if (n.startsWith('T03_01_')) file = await h.getFile();
+    const b = new Uint8Array(await file.arrayBuffer());
+    const v = new DataView(b.buffer);
+    const str = (o, n) => String.fromCharCode(...b.subarray(o, o + n)).replace(/\0+$/, '');
+    const chunks = [];
+    let o = 12;
+    while (o + 8 <= b.length) {
+      const id = str(o, 4);
+      const size = v.getUint32(o + 4, true);
+      chunks.push({ id, offset: o + 8, size });
+      if (id === 'data') break;
+      o += 8 + size;
+    }
+    const bext = chunks.find((c) => c.id === 'bext');
+    const data = chunks.find((c) => c.id === 'data');
+    const sr = window.daw.engine.sampleRate;
+    const t = window.tcTest;
+    t.src.stop(); t.merger.disconnect();
+    return {
+      chunks: chunks.map((c) => c.id).join(','),
+      dataOk: data.offset === 654 && data.offset + data.size === b.length && v.getUint32(4, true) === b.length - 8,
+      description: str(bext.offset, 256),
+      originator: str(bext.offset + 256, 32),
+      timeReference: Number(v.getBigUint64(bext.offset + 338, true)),
+      expected: 3600 * sr + (t.recStart - t.startFrame),
+      takeInfo: document.getElementById('take-info').textContent,
+    };
+  });
+  await page.selectOption('#sel-tc', 'off');
+  const tcOffClock = await page.textContent('#clock');
+  const tcStatusHidden = await page.isHidden('#tc-status');
+  const timecode = { tcOptions, tcNoSignal, tcLtc, tcLocked, tcTakeInfo, bwf, tcOffClock, tcStatusHidden };
+  const timecodeOk = tcOptions >= 34 && tcNoSignal.status === 'LTC · no signal' && tcNoSignal.clock === '--:--:--:--'
+    && tcLocked.status === 'LTC 25 fps' && /^01:00:0\d:\d\d$/.test(tcLocked.clock) && /· 0:0\d$/.test(tcTakeInfo)
+    && bwf.chunks === 'fmt ,bext,data' && bwf.dataOk && bwf.originator === 'Soundbending Live'
+    && /^sTC=01:00:0\d:\d\d fps=25$/.test(bwf.description) && Math.abs(bwf.timeReference - bwf.expected) <= 2
+    && /TC 01:00:0/.test(bwf.takeInfo) && /^\d\d:\d\d:\d\d\.\d{3}$/.test(tcOffClock) && tcStatusHidden;
+
   // Live mode: switch tab, go live, and check the mix reaches the master output.
   await page.click('.mode[data-mode="live"]');
   const maxPeak = (fn) => page.evaluate(async (src) => {
@@ -183,9 +257,9 @@ try {
     && gatedPeak < 0.01 && bypassPeak > 0.05 && /Gain reduction -\d/.test(grText) && inserts.join() === 'Gate,Compressor';
 
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });
-  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, wam, errors });
+  console.log({ info, ...result, playing, afterDelete, namesOk, tips, tabOk, live, wam, timecode, errors });
   const ok = result.take === 1 && result.duration > 1.5 && result.duration < 3 && result.maxPeak > 0.01
-    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && liveOk && wamOk && tabOk.join() === 'Bass,Keys,true' && diskOk
+    && result.recordedTracks === 32 && result.exportEnabled && playing && afterDelete === 31 && firstGone && namesOk && tipsOk && liveOk && wamOk && tabOk.join() === 'Bass,Keys,true' && diskOk && timecodeOk
     && errors.length === 0;
   if (!ok) { failed = true; console.error('SMOKE TEST FAILED'); } else console.log('SMOKE TEST PASSED');
 } finally {

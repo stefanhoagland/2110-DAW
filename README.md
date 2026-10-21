@@ -21,6 +21,17 @@
 - **Import names / Export names** load and save channel names as a CSV file with `Channel,Name` columns (a plain list of names, one per line, also works). Handy for keeping a channel list per show or copying it from your console's input list.
 - Click a clip to select it and press `Delete` (or the Delete button) to remove it. If it was saved to a folder, the WAV file is moved into a `Deleted` subfolder there, so it can be recovered.
 
+### Timecode
+
+Pick a source in **Timecode** (next to the input settings); the choice is remembered:
+
+- **LTC on input N**: SMPTE linear timecode arriving as audio on one input channel of your interface (from a timecode generator, a video deck or another recorder). The frame rate is detected (23.976, 24, 25, 29.97, 30, and 29.97 drop-frame).
+- **MTC: <MIDI input>**: MIDI timecode from a MIDI interface (Chrome/Edge; the browser asks for MIDI access).
+
+The top-bar clock then shows timecode (`HH:MM:SS:FF`, `;` before the frames for drop-frame), with the source and rate underneath. When nothing arrives for half a second it shows **no signal**, dims and keeps running from the last value; while recording, the take's length shows next to the take info. Set it back to **Off** for the normal clock.
+
+When timecode is locked as a take starts, every WAV of that take is a **Broadcast Wave** file stamped with the timecode of its first sample (the `bext` time reference, plus `sTC=… fps=…` in the description), so Pro Tools, Reaper, Logic and similar can spot the files to their original timecode position. Without timecode the files are plain WAVs as before.
+
 Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channel's name (`Shift+Tab` goes back). `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.
 
 ## Live mode
@@ -86,7 +97,7 @@ Browsers see an audio interface the same way they see a microphone, and some dri
 ## Development
 
 ```sh
-npm test               # WAV encoding unit tests (Node)
+npm test               # WAV/BWF encoding and timecode decoding unit tests (Node)
 npm run test:browser   # records 2 seconds in headless Chromium with a fake mic (needs Playwright)
 ```
 
@@ -98,7 +109,9 @@ No build step: plain HTML, CSS and JavaScript modules.
 | `js/audio-engine.js` | Input device, recording control, playback |
 | `js/recorder-worklet.js` | Audio-thread processor: splits channels, meters, captures samples |
 | `js/storage.js` | Streaming WAV writer for a chosen folder, in-memory fallback |
-| `js/wav.js` | WAV header and 24-bit encoding |
+| `js/wav.js` | WAV header (with optional BWF `bext` timecode stamp) and 24-bit encoding |
+| `js/timecode.js` | LTC decoder, frame-rate detection, MTC parser, timecode math (no browser APIs) |
+| `js/timecode-source.js` | Timecode setting, MIDI input, the running timecode for the clock and recordings |
 
 ## Roadmap
 

@@ -2,12 +2,14 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "Timecode.h"
 
 // Audio input, metering, multitrack recording and the live mix.
 // Every input channel of the interface is a track. While recording, each armed
 // track streams to its own 24-bit mono WAV file on a background thread, so the
 // audio thread never touches the disk.
-class AudioEngine : public juce::AudioIODeviceCallback
+class AudioEngine : public juce::AudioIODeviceCallback,
+                    private juce::MidiInputCallback
 {
 public:
     static constexpr int maxChannels = 256;
@@ -101,6 +103,27 @@ public:
     bool getPatch (int source, int output) const;
     void resetPatches(); // 1:1 inputs, mix to outputs 1 and 2
 
+    // ---- Timecode ----
+    // An external timecode source: LTC on one interface input, or MIDI timecode (MTC).
+    // While it's locked, takes are stamped with the timecode of their first sample (BWF
+    // time reference), so other DAWs place the files at the right time.
+    void setTimecodeOff();
+    void setTimecodeLtc (int deviceInput);
+    bool setTimecodeMtc (const juce::String& midiDeviceId); // false if the port can't open
+    struct TimecodeNow
+    {
+        bool active = false;  // a source is chosen
+        bool locked = false;  // timecode arrived in the last half second
+        bool seen = false;    // any timecode since the source was chosen
+        double frames = 0.0;  // now, freewheeling from the last frame when not locked
+        tc::Rate rate;
+    };
+    TimecodeNow timecodeNow() const;
+    // Timecode of the current (or last) take's first sample; seen is false if it had none.
+    TimecodeNow takeTimecode() const;
+    // Writes the time reference and description into a WAV file's bext chunk.
+    static bool stampBext (const juce::File& wav, juce::int64 timeReference, const juce::String& description);
+
     // AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                            float* const* outputs, int numOutputs, int numSamples,
@@ -110,6 +133,8 @@ public:
 
 private:
     void selectLargestInput();
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+    void stampTake();
     void mixLive (int tracks, float* const* outputs, int numOuts, int numSamples);
 
     juce::AudioDeviceManager deviceManager;
@@ -148,6 +173,21 @@ private:
     std::atomic<juce::int64> samplesRecorded { 0 };
     std::atomic<int> dropped { 0 };
     juce::StringArray takeFiles;
+
+    // Timecode. The anchor ties a timecode frame count to a sample position; the audio
+    // thread only try-locks tcLock, so it never waits.
+    struct Anchor { double frames = 0.0; juce::int64 sample = 0; tc::Rate rate; bool valid = false; };
+    mutable juce::SpinLock tcLock;
+    Anchor anchor;
+    juce::int64 clockSample = 0; double clockMs = 0.0; // callback start, for MIDI and the UI
+    juce::int64 samplePos = 0;                          // audio thread
+    std::atomic<int> tcMode { 0 }, ltcInput { -1 };     // 0 off, 1 LTC, 2 MTC
+    std::atomic<bool> ltcReset { true };
+    tc::LtcDecoder ltc;                                 // audio thread
+    tc::MtcParser mtc;                                  // MIDI thread
+    std::unique_ptr<juce::MidiInput> mtcInput;
+    std::atomic<bool> takeTcValid { false };
+    double takeTcFrames = 0.0, takeSampleRate = 0.0; tc::Rate takeTcRate;     // written before takeTcValid is set
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

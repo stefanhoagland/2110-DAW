@@ -17,6 +17,8 @@ no 32-channel cap, low latency, and (coming next) VST3/AU plugins.
 
 - **Plugins**: VST3 and Audio Unit effects on each Live strip, between gain and pan (up to 8 per channel). Click **Plugins...** in the Live bar, then **Options > Scan for new or updated VST3/AudioUnit plug-ins** the first time. **+ Plugin** adds one; click it to open its window, right-click to bypass, move or remove it (Alt-click also toggles bypass). Plugins run in mono when they support it, otherwise in stereo with the two sides averaged back to the channel. Every plugin and its settings are saved and come back next launch.
 
+- **Timecode**: click **Timecode** in the setup bar to follow external timecode, either LTC on one of your interface inputs or MIDI timecode (MTC) from a MIDI input. The frame rate (23.976, 24, 25, 29.97, 29.97 drop-frame, 30) is detected automatically. The clock then shows the timecode (dimmed with "no signal" if it stops), and every take is stamped with the timecode of its first sample as a Broadcast WAV, so Pro Tools, Logic, Reaper and others can place the files at the right time.
+
 Coming next: playback and Soundcheck (its track playback will appear as sources in the Outputs grid).
 
 ## Download
