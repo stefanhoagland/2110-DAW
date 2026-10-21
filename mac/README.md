@@ -11,8 +11,9 @@ no 32-channel cap, low latency, and (coming next) VST3/AU plugins.
 - **Save folder** picks where takes go (default `~/Music/Soundbending Live`, or `~/Music/2110 DAW` if you already used it); the bar shows free space and roughly how many hours fit.
 - **Import names / Export names** use the same `Channel,Name` CSV as the web version.
 - If the disk can't keep up, the app says so after the take instead of failing silently.
+- **Live** tab: a console strip per input with gain, pan, fader, post-fader meter, mute and solo, plus a master fader and stereo meter in the top bar. **Go live** sends the mix to the first two outputs chosen in Audio settings, through an optional master limiter (ceiling -1 dB). Double-click a control to reset it. Settings are remembered.
 
-Coming next: the Live console (gain, plugins, faders, pan, mute/solo and a stereo mix out), VST3/AU plugins, playback and Soundcheck.
+Coming next: a patch grid for routing inputs and outputs, VST3/AU plugins on the strips, playback and Soundcheck.
 
 ## Download
 

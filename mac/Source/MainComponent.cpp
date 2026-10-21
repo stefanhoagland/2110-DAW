@@ -45,10 +45,19 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
         addAndMakeVisible (*t);
     }
     studioTab.setToggleState (true, dontSendNotification);
-    liveTab.setEnabled (false);
     soundcheckTab.setEnabled (false);
-    liveTab.setTooltip ("The live console is coming to the Mac app in a later step");
     soundcheckTab.setTooltip ("Coming in a later step");
+    liveTab.onClick = [this] { setMode (true); };
+    studioTab.onClick = [this] { setMode (false); };
+
+    addChildComponent (console);
+    console.onChange = [this] { saveLive(); };
+    console.onGoLive = [this] (bool on)
+    {
+        setStatus (on ? "Live mix is going to the output" : "Live mix stopped");
+    };
+    addAndMakeVisible (master);
+    master.onChange = [this] { saveLive(); };
 
     for (auto* b : { &rtzButton, &stopButton, &playButton, &recordButton })
     {
@@ -98,18 +107,24 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     engine.initialise (deviceXml.get());
     engine.devices().addChangeListener (this);
     rebuildTracks();
+    console.loadState (settings.getValue ("live"));
+    master.refreshFromEngine();
+    console.refresh();
     refreshLabels();
+    setMode (settings.getValue ("mode") == "live");
 
     setWantsKeyboardFocus (true);
-    setSize (1100, 720);
+    setSize (1360, 820);
     startTimerHz (30);
 }
 
 MainComponent::~MainComponent()
 {
     engine.devices().removeChangeListener (this);
+    engine.setLive (false);
     engine.stopRecording();
     saveTracks();
+    saveLive();
     LookAndFeel::setDefaultLookAndFeel (nullptr);
 }
 
@@ -122,7 +137,7 @@ void MainComponent::paint (Graphics& g)
     g.fillRect (topBar);
     g.fillRect (setupBar);
     g.setColour (theme::line);
-    for (auto r : { topBar, setupBar, toolBar })
+    for (auto r : { topBar, setupBar, liveMode ? Rectangle<int>() : toolBar })
         g.fillRect (r.getX(), r.getBottom() - 1, r.getWidth(), 1);
     if (notice.isVisible())
     {
@@ -158,7 +173,7 @@ void MainComponent::resized()
     auto r = getLocalBounds();
 
     // Top bar: brand, modes, then the transport on the right.
-    topBar = r.removeFromTop (56);
+    topBar = r.removeFromTop (98);
     {
         auto b = topBar.reduced (16, 10).withTrimmedBottom (1);
         const int brandW = GlyphArrangement::getStringWidthInt (FontOptions (18.0f, Font::bold), "Soundbending Live");
@@ -173,6 +188,14 @@ void MainComponent::resized()
             p.removeFromLeft (4);
         }
 
+        // The master section needs room; on a narrow window it hides rather than overlap the transport.
+        const bool roomForMaster = b.getWidth() >= 330 + 24 + 150 + 4 * 46 + 12;
+        master.setVisible (roomForMaster);
+        if (roomForMaster)
+        {
+            master.setBounds (b.removeFromRight (330).withSizeKeepingCentre (330, 78));
+            b.removeFromRight (24);
+        }
         clockBox = b.removeFromRight (150).withSizeKeepingCentre (150, 34);
         clock.setBounds (clockBox);
         b.removeFromRight (6);
@@ -200,6 +223,12 @@ void MainComponent::resized()
 
     noticeBar = notice.isVisible() ? r.removeFromTop (34) : Rectangle<int>();
     notice.setBounds (noticeBar.reduced (12, 0));
+
+    if (liveMode)
+    {
+        console.setBounds (r);
+        return;
+    }
 
     // Toolbar: names and arming, take info, zoom.
     toolBar = r.removeFromTop (46);
@@ -250,7 +279,36 @@ void MainComponent::rebuildTracks()
         };
         trackArea.addAndMakeVisible (row);
     }
+    console.rebuild (n, trackNames());
     resized();
+}
+
+StringArray MainComponent::trackNames() const
+{
+    StringArray list;
+    for (auto* r : rows) list.add (r->getName());
+    return list;
+}
+
+void MainComponent::setMode (bool live)
+{
+    liveMode = live;
+    liveTab.setToggleState (live, dontSendNotification);
+    studioTab.setToggleState (! live, dontSendNotification);
+    for (Component* c : { (Component*) &armAll, (Component*) &disarmAll, (Component*) &importButton,
+                          (Component*) &exportButton, (Component*) &takeInfo, (Component*) &zoomIn,
+                          (Component*) &zoomOut, (Component*) &zoomLabel, (Component*) &viewport })
+        c->setVisible (! live);
+    console.setVisible (live);
+    if (live) console.setNames (trackNames());
+    settings.setValue ("mode", live ? "live" : "studio");
+    resized();
+    repaint();
+}
+
+void MainComponent::saveLive()
+{
+    settings.setValue ("live", console.saveState());
 }
 
 void MainComponent::saveTracks()
@@ -281,6 +339,8 @@ void MainComponent::changeListenerCallback (ChangeBroadcaster*)
     // Device changed in Audio settings.
     saveDevice();
     rebuildTracks();
+    console.setNames (trackNames());
+    console.refresh();
     refreshLabels();
 }
 
@@ -448,6 +508,8 @@ void MainComponent::timerCallback()
         if (rec && r->hasTake()) r->addWave (secs, peak);
     }
     trackArea.setTake (take, secs, rec);
+    master.tick();
+    if (liveMode) console.tick();
 
     const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
     const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;

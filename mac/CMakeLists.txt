@@ -31,6 +31,7 @@ target_sources(DAW2110 PRIVATE
   Source/TrackRow.cpp
   Source/TrackArea.cpp
   Source/Look.cpp
+  Source/Console.cpp
   Source/Names.cpp)
 
 target_compile_definitions(DAW2110 PRIVATE

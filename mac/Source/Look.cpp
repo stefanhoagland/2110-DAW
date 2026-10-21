@@ -3,7 +3,7 @@
 
 using namespace juce;
 
-static String styleOf (const Button& b) { return b.getProperties()["style"].toString(); }
+static String styleOf (const Component& b) { return b.getProperties()["style"].toString(); }
 
 WebLook::WebLook()
 {
@@ -69,7 +69,7 @@ Font WebLook::getTextButtonFont (TextButton& b, int)
     const auto style = styleOf (b);
     if (style == "transport") return FontOptions (15.0f);
     if (style == "small") return FontOptions (11.0f, Font::bold);
-    if (style == "primary" || (style == "mode" && b.getToggleState())) return FontOptions (13.0f, Font::bold);
+    if (style == "primary" || style == "bold" || (style == "mode" && b.getToggleState())) return FontOptions (13.0f, Font::bold);
     return FontOptions (13.0f);
 }
 
@@ -107,4 +107,104 @@ void WebLook::drawScrollbar (Graphics& g, ScrollBar&, int x, int y, int w, int h
                                       : Rectangle<float> ((float) thumbStart, (float) y + 2, (float) thumbSize, (float) h - 4);
     g.setColour (over || down ? theme::textMuted : theme::line);
     g.fillRoundedRectangle (thumb, 3.0f);
+}
+
+int WebLook::getSliderThumbRadius (Slider& s)
+{
+    const auto style = styleOf (s);
+    if (style == "fader") return 23;  // 46 px cap, like the web .fader thumb
+    if (style == "hfader") return 7;  // 14 px cap
+    return 6;
+}
+
+// The brushed-metal cap from the web CSS (.fader / .hfader thumbs).
+static void drawCap (Graphics& g, Rectangle<float> cap, bool vertical, bool focused)
+{
+    g.setColour (Colours::black.withAlpha (0.6f));
+    g.fillRoundedRectangle (cap.translated (0.0f, vertical ? 3.0f : 2.0f), 4.0f);
+
+    ColourGradient metal (Colour (0xff8d939e), 0, 0, Colour (0xff7b818c), 0, 0, false);
+    if (vertical) { metal.point1 = cap.getTopLeft(); metal.point2 = cap.getBottomLeft(); }
+    else          { metal.point1 = cap.getTopLeft(); metal.point2 = cap.getTopRight(); }
+    metal.addColour (0.18, Colour (0xffd4d8df));
+    metal.addColour (0.5, Colour (0xff6f7580));
+    metal.addColour (0.82, Colour (0xffc3c8d0));
+    g.setGradientFill (metal);
+    g.fillRoundedRectangle (cap, vertical ? 4.0f : 3.0f);
+
+    if (vertical)
+    {
+        g.setColour (Colours::black.withAlpha (0.18f));
+        for (float y = cap.getY() + 3.0f; y < cap.getBottom() - 1.0f; y += 4.0f)
+            g.fillRect (cap.getX() + 1.0f, y, cap.getWidth() - 2.0f, 1.0f);
+        g.setColour (Colour (0xffe9ecf2));
+        g.fillRect (cap.getX(), cap.getCentreY() - 1.0f, cap.getWidth(), 2.0f);
+    }
+    else
+    {
+        g.setColour (Colour (0xffe9ecf2));
+        g.fillRect (cap.getCentreX() - 1.0f, cap.getY(), 2.0f, cap.getHeight());
+    }
+    g.setColour (focused ? theme::accent : Colour (0xff0b0c0f));
+    g.drawRoundedRectangle (cap.reduced (0.5f), vertical ? 4.0f : 3.0f, 1.0f);
+}
+
+void WebLook::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float,
+                                Slider::SliderStyle, Slider& s)
+{
+    const auto style = styleOf (s);
+    const auto b = Rectangle<int> (x, y, w, h).toFloat();
+    if (style == "fader")
+    {
+        auto slot = Rectangle<float> (b.getCentreX() - 3.0f, 0.0f, 6.0f, (float) s.getHeight());
+        ColourGradient grad (Colour (0xff050608), slot.getX(), 0, Colour (0xff050608), slot.getRight(), 0, false);
+        grad.addColour (0.5, Colour (0xff1a1d23));
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (slot, 3.0f);
+        g.setColour (Colour (0xff2a2e37));
+        g.drawRoundedRectangle (slot.expanded (0.5f), 3.0f, 1.0f);
+        drawCap (g, Rectangle<float> (30.0f, 46.0f).withCentre ({ b.getCentreX(), pos }), true, s.hasKeyboardFocus (false));
+        return;
+    }
+    if (style == "hfader")
+    {
+        auto slot = Rectangle<float> (0.0f, b.getCentreY() - 2.5f, (float) s.getWidth(), 5.0f);
+        ColourGradient grad (Colour (0xff050608), 0, slot.getY(), Colour (0xff050608), 0, slot.getBottom(), false);
+        grad.addColour (0.5, Colour (0xff1a1d23));
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (slot, 2.5f);
+        g.setColour (Colour (0xff2a2e37));
+        g.drawRoundedRectangle (slot.expanded (0.5f), 2.5f, 1.0f);
+        drawCap (g, Rectangle<float> (14.0f, 20.0f).withCentre ({ pos, b.getCentreY() }), false, s.hasKeyboardFocus (false));
+        return;
+    }
+    // Thin range control: grey track, blue fill up to a round blue thumb.
+    const float cy = b.getCentreY();
+    const float alpha = s.isEnabled() ? 1.0f : 0.45f;
+    g.setColour (theme::line.withMultipliedAlpha (alpha));
+    g.fillRoundedRectangle (0.0f, cy - 2.0f, (float) s.getWidth(), 4.0f, 2.0f);
+    g.setColour (Colour (0xff9cc8ff).withMultipliedAlpha (alpha));
+    g.fillRoundedRectangle (0.0f, cy - 2.0f, pos, 4.0f, 2.0f);
+    g.setColour (theme::accent.withMultipliedAlpha (alpha));
+    g.fillEllipse (Rectangle<float> (12.0f, 12.0f).withCentre ({ pos, cy }));
+}
+
+void WebLook::drawTickBox (Graphics& g, Component&, float x, float y, float w, float h,
+                           bool ticked, bool enabled, bool, bool)
+{
+    auto box = Rectangle<float> (x, y, w, h).withSizeKeepingCentre (14.0f, 14.0f);
+    const float alpha = enabled ? 1.0f : 0.45f;
+    g.setColour ((ticked ? theme::accent : theme::panel2).withMultipliedAlpha (alpha));
+    g.fillRoundedRectangle (box, 3.0f);
+    g.setColour ((ticked ? theme::accent : theme::line).withMultipliedAlpha (alpha));
+    g.drawRoundedRectangle (box, 3.0f, 1.0f);
+    if (ticked)
+    {
+        Path tick;
+        tick.startNewSubPath (box.getX() + 3.5f, box.getCentreY());
+        tick.lineTo (box.getX() + 6.0f, box.getBottom() - 4.0f);
+        tick.lineTo (box.getRight() - 3.0f, box.getY() + 3.5f);
+        g.setColour (theme::accentText);
+        g.strokePath (tick, PathStrokeType (2.0f));
+    }
 }

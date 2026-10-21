@@ -90,6 +90,60 @@ int main()
         check (err24 < 1.0e-5f, "audio matches (max error " + String (err24) + ")");
     }
 
+    // ---- Live mix ----
+    AudioBuffer<float> out (2, block);
+    auto run = [&] (int count)
+    {
+        for (int b = 0; b < count; ++b)
+        {
+            for (int i = 0; i < block; ++i, ++pos)
+            {
+                in.setSample (0, i, 0.5f * std::sin ((float) pos * 0.05f));
+                in.setSample (63, i, 0.0f);
+            }
+            engine.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), 64, out.getArrayOfWritePointers(), 2, block, ctx);
+        }
+        return std::pair<float, float> { out.getMagnitude (0, 0, block), out.getMagnitude (1, 0, block) };
+    };
+    for (int c = 1; c < 64; ++c) engine.strip (c).faderDb = -60.0f; // only channel 1 up
+    auto [l0, r0] = run (4);
+    check (l0 == 0.0f && r0 == 0.0f, "silent until Go live");
+    check (engine.takeStripPeak (0) > 0.49f, "strip meter runs before going live");
+
+    engine.setLive (true);
+    auto [l1, r1] = run (4);
+    check (std::abs (l1 - r1) < 0.01f && std::abs (l1 - 0.5f * 0.7071f) < 0.01f, "centre pan: -3 dB each side (" + String (l1) + ", " + String (r1) + ")");
+
+    engine.strip (0).pan = -1.0f;
+    auto [l2, r2] = run (4);
+    check (std::abs (l2 - 0.5f) < 0.01f && r2 < 0.001f, "hard left pan");
+
+    engine.strip (0).faderDb = -6.0f;
+    auto [l3, r3] = run (4);
+    check (std::abs (l3 - 0.5f * 0.5012f) < 0.01f, "fader at -6 dB");
+
+    engine.strip (5).solo = true;
+    auto [l4, r4] = run (4);
+    check (l4 == 0.0f, "solo on another channel silences this one");
+    engine.strip (5).solo = false;
+
+    engine.strip (0).mute = true;
+    auto [l5, r5] = run (4);
+    check (l5 == 0.0f, "mute");
+    engine.strip (0).mute = false;
+
+    engine.strip (0).faderDb = 10.0f;
+    engine.strip (0).trimDb = 20.0f;
+    auto [l6, r6] = run (8);
+    check (l6 <= 0.8915f && l6 > 0.85f, "limiter holds the output at -1 dB (" + String (l6) + ")");
+    engine.setLimiter (false);
+    auto [l7, r7] = run (4);
+    check (l7 > 10.0f, "limiter off lets it through");
+
+    engine.setLive (false);
+    auto [l8, r8] = run (2);
+    check (l8 == 0.0f, "silent after leaving live");
+
     dir.deleteRecursively();
     std::cout << (failures ? "FAILED\n" : "ALL PASSED\n");
     return failures ? 1 : 0;

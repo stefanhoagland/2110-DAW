@@ -2,7 +2,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
-// Audio input, metering and multitrack recording.
+// Audio input, metering, multitrack recording and the live mix.
 // Every input channel of the interface is a track. While recording, each armed
 // track streams to its own 24-bit mono WAV file on a background thread, so the
 // audio thread never touches the disk.
@@ -39,6 +39,35 @@ public:
     int droppedBlocks() const { return dropped.load(); }
     juce::StringArray lastTakeFiles() const { return takeFiles; }
 
+    // ---- Live mix (the Live tab) ----
+    // Each input: trim -> fader -> pan into a stereo bus -> master fader ->
+    // optional limiter -> the first two outputs of the device. Same chain as the
+    // web version's Live mode. Controls are atomics so the UI can set them any time.
+    struct Strip
+    {
+        std::atomic<float> trimDb { 0.0f };   // -20..+20
+        std::atomic<float> faderDb { 0.0f };  // -60..+10; at or below -60 is off
+        std::atomic<float> pan { 0.0f };      // -1 (left)..+1 (right)
+        std::atomic<bool> mute { false }, solo { false };
+    };
+    Strip& strip (int channel) { return strips[(size_t) juce::jlimit (0, maxChannels - 1, channel)]; }
+
+    void setLive (bool on) { liveOn = on; }
+    bool isLive() const { return liveOn.load(); }
+    void setLimiter (bool on) { limiterOn = on; }
+    bool limiterEnabled() const { return limiterOn.load(); }
+    void setMasterDb (float db) { masterDb = db; }
+    float getMasterDb() const { return masterDb.load(); }
+    int numOutputs() const { return outputCount.load(); }
+    double outputLatencyMs() const;
+
+    // Post-fader level of a strip, and the master output (after the limiter),
+    // since the last call; then resets.
+    float takeStripPeak (int channel);
+    float takeMasterPeak (int side);
+
+    static float faderGain (float db) { return db <= -60.0f ? 0.0f : juce::Decibels::decibelsToGain (db); }
+
     // AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                            float* const* outputs, int numOutputs, int numSamples,
@@ -48,6 +77,7 @@ public:
 
 private:
     void selectLargestInput();
+    void mixLive (const float* const* inputs, int numIns, float* const* outputs, int numOuts, int numSamples);
 
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread writerThread { "Soundbending Live disk writer" };
@@ -56,6 +86,16 @@ private:
     std::array<int, maxChannels> activeToChannel {}; // callback input index -> device channel
     std::atomic<int> inputCount { 0 };
     std::atomic<double> currentRate { 0.0 };
+
+    std::array<Strip, maxChannels> strips;
+    std::array<std::atomic<float>, maxChannels> stripPeaks {};
+    std::array<std::atomic<float>, 2> masterPeaks {};
+    std::array<float, maxChannels> lastL {}, lastR {}; // gains used last block, for smooth changes
+    std::atomic<bool> liveOn { false }, limiterOn { true };
+    std::atomic<float> masterDb { 0.0f };
+    std::atomic<int> outputCount { 0 };
+    float lastMaster = 0.0f, limiterEnv = 0.0f, limiterRelease = 0.0f;
+    juce::AudioBuffer<float> work, bus;
 
     juce::SpinLock writersLock; // held by the audio thread while writing; by start/stop to swap
     std::vector<std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter>> writers; // by device channel
