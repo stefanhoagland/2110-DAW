@@ -288,7 +288,7 @@ void ConsoleView::setNames (const StringArray& names)
     for (auto* s : strips)
     {
         s->setName (names[s->channel()]);
-        s->setHasInput (s->channel() < engine.numInputs());
+        s->setHasInput (s->channel() < engine.numInputs() && engine.getTrackSource (s->channel()) >= 0);
     }
 }
 
@@ -300,18 +300,17 @@ void ConsoleView::refresh()
     status.setText (live ? "Live mix is on" : "Live mix is off", dontSendNotification);
     status.setColour (Label::textColourId, live ? theme::record : theme::textMuted);
 
+    // Where the mix goes, from the output patch.
     auto* dev = engine.devices().getCurrentAudioDevice();
-    String out = "Output: none (pick one in Audio settings)";
-    if (dev != nullptr && engine.numOutputs() > 0)
-    {
-        auto names = dev->getOutputChannelNames();
-        auto active = dev->getActiveOutputChannels();
-        StringArray used;
-        for (int i = 0; i < names.size() && used.size() < 2; ++i)
-            if (active[i]) used.add (names[i]);
-        out = "Output: " + engine.devices().getAudioDeviceSetup().outputDeviceName
-            + (used.isEmpty() ? String() : " (" + used.joinIntoString (" + ") + ")");
-    }
+    StringArray used;
+    for (int o = 0; o < engine.numOutputs(); ++o)
+        if (engine.getPatch (AudioEngine::mixLeft, o) || engine.getPatch (AudioEngine::mixRight, o))
+        {
+            auto n = dev != nullptr ? dev->getOutputChannelNames()[o] : String();
+            used.add (n.isNotEmpty() ? n : "Out " + String (o + 1));
+        }
+    String out = used.isEmpty() ? String ("Output: none (patch the live mix in Patch)")
+                                : "Output: " + engine.devices().getAudioDeviceSetup().outputDeviceName + " (" + used.joinIntoString (" + ") + ")";
     output.setText (out, dontSendNotification);
     const double ms = engine.outputLatencyMs();
     latency.setText (ms > 0 ? String (CharPointer_UTF8 ("Latency \xe2\x89\x88 ")) + String (roundToInt (ms)) + " ms" : String(),

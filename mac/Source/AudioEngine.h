@@ -19,7 +19,7 @@ public:
     // Opens the saved device setup (or the default device) with every input enabled.
     void initialise (const juce::XmlElement* savedState);
 
-    int numInputs() const { return inputCount.load(); }
+    int numInputs() const { return inputCount.load(); }   // device inputs = number of tracks
     double sampleRate() const { return currentRate.load(); }
     juce::String deviceDescription() const;
 
@@ -68,6 +68,18 @@ public:
 
     static float faderGain (float db) { return db <= -60.0f ? 0.0f : juce::Decibels::decibelsToGain (db); }
 
+    // ---- Patching ----
+    // Input patch: which device input feeds each track (-1 = none). Default is 1:1.
+    // Tracks are what Studio records and what the Live strips mix.
+    void setTrackSource (int track, int deviceInput);
+    int getTrackSource (int track) const;
+    // Output patch: any source to any device output (several sources on one output add up).
+    // Sources: 0 = live mix left, 1 = live mix right, 2 + t = track t's direct signal.
+    static constexpr int mixLeft = 0, mixRight = 1, firstDirect = 2, numSources = 2 + maxChannels;
+    void setPatch (int source, int output, bool on);
+    bool getPatch (int source, int output) const;
+    void resetPatches(); // 1:1 inputs, mix to outputs 1 and 2
+
     // AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                            float* const* outputs, int numOutputs, int numSamples,
@@ -77,13 +89,18 @@ public:
 
 private:
     void selectLargestInput();
-    void mixLive (const float* const* inputs, int numIns, float* const* outputs, int numOuts, int numSamples);
+    void mixLive (int tracks, float* const* outputs, int numOuts, int numSamples);
 
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread writerThread { "Soundbending Live disk writer" };
 
     std::array<std::atomic<float>, maxChannels> peaks {};
-    std::array<int, maxChannels> activeToChannel {}; // callback input index -> device channel
+    std::array<int, maxChannels> activeToChannel {};  // callback input index -> device channel
+    std::array<int, maxChannels> channelToActive {};  // device input -> callback index, or -1
+    std::array<int, maxChannels> outChannelToActive {}; // device output -> callback index, or -1
+    std::array<std::atomic<int>, maxChannels> trackSource;
+    std::array<std::atomic<bool>, (size_t) numSources * maxChannels> patch {};
+    std::array<const float*, maxChannels> trackIn {}; // audio thread only
     std::atomic<int> inputCount { 0 };
     std::atomic<double> currentRate { 0.0 };
 

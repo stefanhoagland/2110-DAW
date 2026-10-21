@@ -7,6 +7,7 @@ static const String sep = String (CharPointer_UTF8 ("  \xc2\xb7  "));
 
 AudioEngine::AudioEngine()
 {
+    resetPatches();
     writerThread.startThread (Thread::Priority::high);
     deviceManager.addAudioCallback (this);
 }
@@ -22,9 +23,9 @@ AudioEngine::~AudioEngine()
 void AudioEngine::initialise (const XmlElement* savedState)
 {
     // Two outputs feed the live mix (pick them in Audio settings).
-    auto err = deviceManager.initialise (maxChannels, 2, savedState, true);
+    auto err = deviceManager.initialise (maxChannels, maxChannels, savedState, true);
     if (err.isNotEmpty())
-        deviceManager.initialiseWithDefaultDevices (maxChannels, 2);
+        deviceManager.initialiseWithDefaultDevices (maxChannels, maxChannels);
 
     // First launch: the system default input is usually the built-in mic, so
     // pick the connected interface with the most inputs instead.
@@ -36,11 +37,16 @@ void AudioEngine::initialise (const XmlElement* savedState)
     {
         auto setup = deviceManager.getAudioDeviceSetup();
         const int n = dev->getInputChannelNames().size();
-        if (setup.inputChannels.countNumberOfSetBits() < n)
+        const int outs = dev->getOutputChannelNames().size();
+        // Every input and output is on, so the patch grid can reach all of them.
+        if (setup.inputChannels.countNumberOfSetBits() < jmin (n, maxChannels)
+            || setup.outputChannels.countNumberOfSetBits() < jmin (outs, maxChannels))
         {
-            setup.useDefaultInputChannels = false;
+            setup.useDefaultInputChannels = setup.useDefaultOutputChannels = false;
             setup.inputChannels.clear();
             setup.inputChannels.setRange (0, jmin (n, maxChannels), true);
+            setup.outputChannels.clear();
+            setup.outputChannels.setRange (0, jmin (outs, maxChannels), true);
             deviceManager.setAudioDeviceSetup (setup, true);
         }
     }
@@ -94,12 +100,22 @@ float AudioEngine::takePeak (int channel)
 void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
 {
     auto active = dev->getActiveInputChannels();
+    channelToActive.fill (-1);
     int k = 0;
     for (int ch = 0; ch < maxChannels && k < maxChannels; ++ch)
         if (active[ch])
+        {
+            channelToActive[(size_t) ch] = k;
             activeToChannel[(size_t) k++] = ch;
+        }
+    auto activeOut = dev->getActiveOutputChannels();
+    outChannelToActive.fill (-1);
+    k = 0;
+    for (int ch = 0; ch < maxChannels; ++ch)
+        if (activeOut[ch])
+            outChannelToActive[(size_t) ch] = k++;
     inputCount = jmin (maxChannels, dev->getInputChannelNames().size());
-    outputCount = dev->getActiveOutputChannels().countNumberOfSetBits();
+    outputCount = jmin (maxChannels, dev->getOutputChannelNames().size());
     currentRate = dev->getCurrentSampleRate();
 
     const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
@@ -142,12 +158,22 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
                                                     float* const* outputs, int numOuts, int numSamples,
                                                     const AudioIODeviceCallbackContext&)
 {
-    for (int i = 0; i < numIns; ++i)
+    // Patch: find each track's input.
+    const int tracks = jmin (inputCount.load (std::memory_order_relaxed), maxChannels);
+    for (int t = 0; t < tracks; ++t)
     {
-        if (inputs[i] == nullptr) continue;
-        auto range = FloatVectorOperations::findMinAndMax (inputs[i], numSamples);
+        const int src = trackSource[(size_t) t].load (std::memory_order_relaxed);
+        const int idx = isPositiveAndBelow (src, maxChannels) ? channelToActive[(size_t) src] : -1;
+        trackIn[(size_t) t] = isPositiveAndBelow (idx, numIns) ? inputs[idx] : nullptr;
+    }
+
+    for (int t = 0; t < tracks; ++t)
+    {
+        auto* in = trackIn[(size_t) t];
+        if (in == nullptr) continue;
+        auto range = FloatVectorOperations::findMinAndMax (in, numSamples);
         const float p = jmax (-range.getStart(), range.getEnd());
-        auto& slot = peaks[(size_t) activeToChannel[(size_t) i]];
+        auto& slot = peaks[(size_t) t];
         if (p > slot.load (std::memory_order_relaxed))
             slot.store (p, std::memory_order_relaxed);
     }
@@ -158,19 +184,26 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         if (lock.isLocked())
         {
             bool lost = false;
-            for (int i = 0; i < numIns; ++i)
+            for (int t = 0; t < tracks; ++t)
             {
-                const auto ch = (size_t) activeToChannel[(size_t) i];
-                if (ch < writers.size() && writers[ch] != nullptr && inputs[i] != nullptr)
-                    if (! writers[ch]->write (&inputs[i], numSamples))
-                        lost = true;
+                if ((size_t) t >= writers.size() || writers[(size_t) t] == nullptr) continue;
+                const float* in = trackIn[(size_t) t];
+                if (in == nullptr && numSamples <= work.getNumSamples())
+                {
+                    // Unpatched track: record silence so every file stays the same length.
+                    auto* w = work.getWritePointer (0);
+                    FloatVectorOperations::clear (w, jmin (numSamples, work.getNumSamples()));
+                    in = w;
+                }
+                if (in == nullptr || ! writers[(size_t) t]->write (&in, numSamples))
+                    lost = true;
             }
             if (lost) ++dropped;
             samplesRecorded += numSamples;
         }
     }
 
-    mixLive (inputs, numIns, outputs, numOuts, numSamples);
+    mixLive (tracks, outputs, numOuts, numSamples);
 }
 
 static void storeMax (std::atomic<float>& slot, float p)
@@ -179,7 +212,7 @@ static void storeMax (std::atomic<float>& slot, float p)
         slot.store (p, std::memory_order_relaxed);
 }
 
-void AudioEngine::mixLive (const float* const* inputs, int numIns, float* const* outputs, int numOuts, int numSamples)
+void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int numSamples)
 {
     for (int i = 0; i < numOuts; ++i)
         if (outputs[i] != nullptr)
@@ -188,15 +221,16 @@ void AudioEngine::mixLive (const float* const* inputs, int numIns, float* const*
         return; // a bigger block than the device promised; skip rather than allocate here
 
     bool anySolo = false;
-    for (int i = 0; i < numIns; ++i)
-        anySolo = anySolo || strips[(size_t) activeToChannel[(size_t) i]].solo.load (std::memory_order_relaxed);
+    for (int t = 0; t < tracks; ++t)
+        anySolo = anySolo || strips[(size_t) t].solo.load (std::memory_order_relaxed);
 
     bus.clear (0, numSamples);
     auto* w = work.getWritePointer (0);
-    for (int i = 0; i < numIns; ++i)
+    for (int t = 0; t < tracks; ++t)
     {
-        if (inputs[i] == nullptr) continue;
-        const auto ch = (size_t) activeToChannel[(size_t) i];
+        const float* in = trackIn[(size_t) t];
+        if (in == nullptr) continue;
+        const auto ch = (size_t) t;
         auto& st = strips[ch];
         const bool audible = ! st.mute.load (std::memory_order_relaxed) && (! anySolo || st.solo.load (std::memory_order_relaxed));
         const float gain = audible ? Decibels::decibelsToGain (st.trimDb.load (std::memory_order_relaxed))
@@ -208,13 +242,13 @@ void AudioEngine::mixLive (const float* const* inputs, int numIns, float* const*
         const float gr = gain * std::sin (x * MathConstants<float>::halfPi);
 
         // Post-fader meter (before pan), like the web strip meter.
-        const float post = gain * FloatVectorOperations::findMaximum (inputs[i], numSamples) ;
-        const float postNeg = -gain * FloatVectorOperations::findMinimum (inputs[i], numSamples);
+        const float post = gain * FloatVectorOperations::findMaximum (in, numSamples) ;
+        const float postNeg = -gain * FloatVectorOperations::findMinimum (in, numSamples);
         storeMax (stripPeaks[ch], jmax (post, postNeg));
 
         if (gl > 0.0f || gr > 0.0f || lastL[ch] > 0.0f || lastR[ch] > 0.0f)
         {
-            FloatVectorOperations::copy (w, inputs[i], numSamples);
+            FloatVectorOperations::copy (w, in, numSamples);
             bus.addFromWithRamp (0, 0, w, numSamples, lastL[ch], gl);
             bus.addFromWithRamp (1, 0, w, numSamples, lastR[ch], gr);
         }
@@ -243,15 +277,61 @@ void AudioEngine::mixLive (const float* const* inputs, int numIns, float* const*
             }
         }
     }
+    else
+    {
+        limiterEnv = 0.0f; // start fresh when it's switched back on
+    }
     storeMax (masterPeaks[0], bus.getMagnitude (0, 0, numSamples));
     storeMax (masterPeaks[1], bus.getMagnitude (1, 0, numSamples));
 
-    if (! liveOn.load (std::memory_order_relaxed))
-        return;
-    int side = 0;
-    for (int i = 0; i < numOuts && side < 2; ++i)
-        if (outputs[i] != nullptr)
-            FloatVectorOperations::copy (outputs[i], bus.getReadPointer (side++), numSamples);
+    // Output patch. The mix only goes out while live; direct track signals always do.
+    const bool live = liveOn.load (std::memory_order_relaxed);
+    const int outs = jmin (outputCount.load (std::memory_order_relaxed), maxChannels);
+    for (int o = 0; o < outs; ++o)
+    {
+        const int idx = outChannelToActive[(size_t) o];
+        if (! isPositiveAndBelow (idx, numOuts) || outputs[idx] == nullptr) continue;
+        auto* dest = outputs[idx];
+        if (live)
+            for (int side = 0; side < 2; ++side)
+                if (patch[(size_t) (side * maxChannels + o)].load (std::memory_order_relaxed))
+                    FloatVectorOperations::add (dest, bus.getReadPointer (side), numSamples);
+        for (int t = 0; t < tracks; ++t)
+            if (trackIn[(size_t) t] != nullptr
+                && patch[(size_t) ((firstDirect + t) * maxChannels + o)].load (std::memory_order_relaxed))
+                FloatVectorOperations::add (dest, trackIn[(size_t) t], numSamples);
+    }
+}
+
+void AudioEngine::setTrackSource (int track, int deviceInput)
+{
+    if (isPositiveAndBelow (track, maxChannels))
+        trackSource[(size_t) track] = isPositiveAndBelow (deviceInput, maxChannels) ? deviceInput : -1;
+}
+
+int AudioEngine::getTrackSource (int track) const
+{
+    return isPositiveAndBelow (track, maxChannels) ? trackSource[(size_t) track].load() : -1;
+}
+
+void AudioEngine::setPatch (int source, int output, bool on)
+{
+    if (isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, maxChannels))
+        patch[(size_t) (source * maxChannels + output)] = on;
+}
+
+bool AudioEngine::getPatch (int source, int output) const
+{
+    return isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, maxChannels)
+        && patch[(size_t) (source * maxChannels + output)].load();
+}
+
+void AudioEngine::resetPatches()
+{
+    for (int t = 0; t < maxChannels; ++t) trackSource[(size_t) t] = t;
+    for (auto& p : patch) p = false;
+    setPatch (mixLeft, 0, true);
+    setPatch (mixRight, 1, true);
 }
 
 String AudioEngine::startRecording (const File& folder, int take, const std::vector<Track>& tracks)

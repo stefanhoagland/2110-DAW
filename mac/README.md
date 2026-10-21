@@ -13,7 +13,9 @@ no 32-channel cap, low latency, and (coming next) VST3/AU plugins.
 - If the disk can't keep up, the app says so after the take instead of failing silently.
 - **Live** tab: a console strip per input with gain, pan, fader, post-fader meter, mute and solo, plus a master fader and stereo meter in the top bar. **Go live** sends the mix to the first two outputs chosen in Audio settings, through an optional master limiter (ceiling -1 dB). Double-click a control to reset it. Settings are remembered.
 
-Coming next: a patch grid for routing inputs and outputs, VST3/AU plugins on the strips, playback and Soundcheck.
+- **Patch** tab: XY crosspoint grids. *Inputs to tracks* picks which interface input feeds each track (Studio records and Live mixes the tracks). *Outputs* sends the live mix L/R or any track's direct input to any interface outputs. Click a cell to connect, drag across cells to do several, **Reset to 1:1** for the default. The patch applies to every tab and is remembered.
+
+Coming next: VST3/AU plugins on the strips, playback and Soundcheck (its track playback will appear as sources in the Outputs grid).
 
 ## Download
 

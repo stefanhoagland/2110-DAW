@@ -4,6 +4,7 @@
 #include "TrackArea.h"
 #include "Look.h"
 #include "Console.h"
+#include "Patch.h"
 
 // The main window, laid out like the web version's Studio view: top bar with modes and
 // transport, a setup bar (device, save folder), a toolbar, then the tracks and timeline.
@@ -37,7 +38,9 @@ private:
     void stopRecording();
     void setStatus (const juce::String&, bool error = false);
     void refreshLabels();
-    void setMode (bool live);
+    enum Mode { studioMode, liveMode, patchMode };
+    void setMode (Mode);
+    void savePatch();
     void saveLive();
     juce::StringArray trackNames() const;
     int nextTakeNumber() const;
@@ -51,7 +54,7 @@ private:
     WebLook look;
     std::unique_ptr<juce::Drawable> logo;
     juce::Label deviceInfo, folderInfo, clock, takeInfo, notice;
-    juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" };
+    juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" }, patchTab { "Patch" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },
                      playButton { juce::CharPointer_UTF8 ("\xe2\x96\xb6") }, recordButton { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
     juce::TextButton audioButton { "Audio settings" }, folderButton { "Choose save folder" },
@@ -65,7 +68,8 @@ private:
     juce::Viewport viewport;
     ConsoleView console { engine };
     MasterStrip master { engine };
-    bool liveMode = false;
+    PatchView patchView { engine, [this] (int t) { return t < rows.size() ? rows[t]->getName() : juce::String(); } };
+    Mode mode = studioMode;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };
 
