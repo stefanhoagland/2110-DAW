@@ -5,6 +5,7 @@ import { namesFromCsv, namesToCsv } from './csv.js';
 import { LiveMixer, faderToDb, fmtDb, pluginName, defaults as stripDefaults } from './live.js';
 import { loadWamModule, knownWams, rememberWam, serverWams, bundledWams } from './wam.js';
 import { PLUGINS, PLUGIN_ORDER, formatParam } from './plugins.js';
+import { TimecodeSource } from './timecode-source.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
 const ROW_H = 64;
@@ -13,6 +14,7 @@ const STORE_KEY = 'daw2110.tracks';
 
 const $ = (id) => document.getElementById(id);
 const engine = new AudioEngine();
+const tc = new TimecodeSource(engine);
 
 const state = {
   open: false,
@@ -30,6 +32,9 @@ const state = {
   editing: null, // { t, k }: plugin open in the editor
   editorGui: null, // { wam, gui }: a third-party plugin's own editor on screen
   serverWams: [], // plugins bundled with the server or in its plugins folder
+  recBext: null, // Broadcast Wave stamp shared by the take's files, when timecode is locked
+  recInfo: '', // take info text while recording
+  recTc: '', // timecode of the take's first sample
 };
 
 const tracks = Array.from({ length: MAX_CHANNELS }, (_, i) => ({
@@ -201,6 +206,103 @@ function bindControls() {
 
   engine.addEventListener('meter', (e) => onMeter(e.detail.peaks));
   engine.addEventListener('data', (e) => onData(e.detail.data));
+  engine.addEventListener('started', (e) => onRecordStarted(e.detail.frame));
+  $('sel-tc').addEventListener('change', onTimecodeChoice);
+  tc.addEventListener('devices', fillTimecodeMenu);
+}
+
+// ---------- timecode ----------
+
+function fillTimecodeMenu() {
+  const sel = $('sel-tc');
+  const s = tc.setting;
+  sel.textContent = '';
+  const opt = (value, text, parent = sel) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = text;
+    parent.appendChild(o);
+  };
+  opt('off', 'Off');
+  const ltc = document.createElement('optgroup');
+  ltc.label = 'LTC (audio input)';
+  for (let ch = 0; ch < MAX_CHANNELS; ch++) opt(`ltc:${ch}`, `LTC on input ${ch + 1}`, ltc);
+  sel.appendChild(ltc);
+  const mtc = document.createElement('optgroup');
+  mtc.label = 'MTC (MIDI)';
+  const inputs = tc.midiInputs();
+  for (const i of inputs) opt(`mtc:${i.id}`, `MTC: ${i.name}`, mtc);
+  if (s.type === 'mtc' && !inputs.some((i) => i.id === s.midi || i.name === s.midiName)) {
+    opt(`mtc:${s.midi}`, `MTC: ${s.midiName || 'MIDI input'} (not connected)`, mtc);
+  }
+  if (!tc.midi) opt('mtc-ask', 'MTC from a MIDI input…', mtc);
+  else if (!inputs.length) opt('mtc-ask', 'MTC: no MIDI inputs found', mtc);
+  sel.appendChild(mtc);
+  const cur = s.type === 'ltc' ? `ltc:${s.channel}` : s.type === 'mtc' ? `mtc:${s.midi}` : 'off';
+  const match = [...sel.options].find((o) => o.value === cur)
+    || (s.type === 'mtc' && [...sel.options].find((o) => o.textContent === `MTC: ${s.midiName}`));
+  sel.value = match ? match.value : 'off';
+}
+
+async function onTimecodeChoice() {
+  const v = $('sel-tc').value;
+  if (v === 'off') await tc.set({ type: 'off' });
+  else if (v.startsWith('ltc:')) await tc.set({ type: 'ltc', channel: +v.slice(4) });
+  else if (v === 'mtc-ask') {
+    try {
+      await tc.requestMidi();
+      const first = tc.midiInputs()[0];
+      if (first) await tc.set({ type: 'mtc', midi: first.id, midiName: first.name });
+      else notice('No MIDI inputs found. Connect your MIDI interface and choose Timecode again.');
+    } catch (err) {
+      notice(`Could not use MIDI: ${tc.midiError || err.message}`, true);
+    }
+  } else if (v.startsWith('mtc:')) {
+    const id = v.slice(4);
+    const input = tc.midiInputs().find((i) => i.id === id);
+    await tc.set({ type: 'mtc', midi: id, midiName: input ? input.name : tc.setting.midiName });
+  }
+  fillTimecodeMenu();
+  state.dirty = true;
+}
+
+// The first recorded sample's position is known: stamp the take's files with its timecode.
+function onRecordStarted(frame) {
+  if (!state.recBext) return;
+  const st = tc.stampAt(frame);
+  if (!st) return;
+  Object.assign(state.recBext, {
+    timeReference: st.timeReference,
+    description: `sTC=${st.label} fps=${st.rate.id}`,
+  });
+  state.recTc = st.label;
+}
+
+function drawTimecode() {
+  const clock = $('clock');
+  const status = $('tc-status');
+  const on = tc.active;
+  clock.classList.toggle('tc', on);
+  status.hidden = !on;
+  if (!on) { clock.classList.remove('tc-lost'); return false; }
+  clock.textContent = tc.text();
+  clock.classList.toggle('tc-lost', !tc.receiving);
+  const st = tc.status();
+  if (status.textContent !== st) status.textContent = st;
+  status.classList.toggle('ok', tc.locked);
+  return true;
+}
+
+function bextStamp() {
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return {
+    description: '',
+    originator: 'Soundbending Live',
+    date: `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`,
+    time: `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`,
+    timeReference: 0, // filled in when the first sample's position is known
+  };
 }
 
 async function enableAudio() {
@@ -335,12 +437,14 @@ async function toggleRecord() {
   const take = state.take + 1;
   const sr = engine.sampleRate;
   const tag = `T${String(take).padStart(2, '0')}`;
+  // With timecode locked, every file of the take gets a Broadcast Wave stamp.
+  const bext = tc.locked ? bextStamp() : null;
   try {
     state.writers = await Promise.all(armed.map(async (t) => {
       const fileName = `${tag}_${String(t.index + 1).padStart(2, '0')}_${safeName(t.name)}.wav`;
       const writer = state.folder
-        ? await DiskWriter.create(state.folder, fileName, sr)
-        : new MemoryWriter(fileName, sr);
+        ? await DiskWriter.create(state.folder, fileName, sr, bext)
+        : new MemoryWriter(fileName, sr, bext);
       return { track: t, writer, fileName };
     }));
   } catch (err) {
@@ -349,6 +453,8 @@ async function toggleRecord() {
   }
 
   state.take = take;
+  state.recBext = bext;
+  state.recTc = '';
   for (const { track, fileName } of state.writers) {
     track.buffer = null;
     track.peaks = [];
@@ -364,7 +470,8 @@ async function toggleRecord() {
   state.playhead = 0;
   $('timeline').scrollLeft = 0;
   $('btn-rec').classList.add('on');
-  $('take-info').textContent = `Recording take ${take} · ${armed.length} track${armed.length === 1 ? '' : 's'}`;
+  state.recInfo = `Recording take ${take} · ${armed.length} track${armed.length === 1 ? '' : 's'}`;
+  $('take-info').textContent = state.recInfo;
   engine.startRecording(armed.map((t) => t.index));
   state.dirty = true;
 }
@@ -412,7 +519,9 @@ async function stopRecording() {
   state.saving = false;
   refreshClipButtons();
   $('take-info').textContent = `Take ${state.take} · ${formatTime(seconds)}` +
+    (state.recTc ? ` · TC ${state.recTc}` : '') +
     (state.folder && !memory ? ` · saved to “${state.folder.name}”` : '');
+  state.recBext = null;
   if (problems.length) notice(`Some tracks failed to save: ${problems.join('; ')}`, true);
   state.dirty = true;
 }
@@ -1157,7 +1266,12 @@ function frame() {
     pos = engine.playPosition;
     if (pos > totalSeconds()) { stopPlayback(); state.playhead = 0; pos = 0; }
   }
-  $('clock').textContent = clockText(pos);
+  if (!drawTimecode()) $('clock').textContent = clockText(pos);
+  else if (state.recording) {
+    // The clock shows timecode, so show the take's length here.
+    const txt = `${state.recInfo} · ${formatTime(pos)}`;
+    if ($('take-info').textContent !== txt) $('take-info').textContent = txt;
+  }
 
   if (state.recording || engine.playing) {
     const tl = $('timeline');
@@ -1176,6 +1290,9 @@ function frame() {
 
 function init() {
   loadSaved();
+  tc.load();
+  fillTimecodeMenu();
+  tc.apply().then(fillTimecodeMenu);
   buildTrackHeaders();
   live = new LiveMixer(engine, tracks, { onPluginReady: onWamReady });
   buildStrips();
@@ -1196,4 +1313,4 @@ function init() {
 init();
 
 // Expose for debugging and automated tests.
-window.daw = { engine, state, tracks, live };
+window.daw = { engine, state, tracks, live, tc };

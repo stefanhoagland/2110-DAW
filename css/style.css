@@ -84,6 +84,18 @@ label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted)
   text-align: center;
 }
 
+.clock-box { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.clock.tc { color: #ffd98a; }
+.clock.tc-lost { opacity: 0.45; }
+.tc-status {
+  font: 10px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  line-height: 1;
+}
+.tc-status.ok { color: var(--ok); }
+#sel-tc { max-width: 210px; }
+
 .setup, .toolbar {
   display: flex;
   flex-wrap: wrap;

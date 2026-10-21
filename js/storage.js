@@ -12,11 +12,16 @@ export async function pickFolder() {
 }
 
 export class DiskWriter {
-  static async create(dir, fileName, sampleRate) {
+  // bext: Broadcast Wave timecode stamp (see wav.js), or null for a plain WAV.
+  // It can be filled in later (e.g. once the first sample's timecode is known):
+  // the header is written again on close.
+  static async create(dir, fileName, sampleRate, bext = null) {
     const handle = await dir.getFileHandle(fileName, { create: true });
     const stream = await handle.createWritable();
     const w = new DiskWriter(handle, stream, sampleRate);
-    w.queue = stream.write(wavHeader({ sampleRate })); // placeholder sizes, fixed on close
+    w.bext = bext;
+    w.withBext = !!bext; // the header size can't change after the samples start
+    w.queue = stream.write(wavHeader({ sampleRate, bext })); // placeholder sizes, fixed on close
     return w;
   }
 
@@ -26,6 +31,8 @@ export class DiskWriter {
     this.sampleRate = sampleRate;
     this.dataBytes = 0;
     this.error = null;
+    this.bext = null;
+    this.withBext = false;
   }
 
   write(f32) {
@@ -38,7 +45,7 @@ export class DiskWriter {
 
   async close() {
     await this.queue;
-    const header = wavHeader({ sampleRate: this.sampleRate, dataBytes: this.dataBytes });
+    const header = wavHeader({ sampleRate: this.sampleRate, dataBytes: this.dataBytes, bext: this.withBext ? this.bext || {} : null });
     await this.stream.write({ type: 'write', position: 0, data: header });
     await this.stream.close();
     if (this.error) throw this.error;
@@ -51,9 +58,10 @@ export class DiskWriter {
 }
 
 export class MemoryWriter {
-  constructor(fileName, sampleRate) {
+  constructor(fileName, sampleRate, bext = null) {
     this.fileName = fileName;
     this.sampleRate = sampleRate;
+    this.bext = bext;
     this.chunks = [];
   }
 
@@ -64,7 +72,7 @@ export class MemoryWriter {
   async close() {}
 
   toBlob() {
-    return new Blob(encodeWavParts(this.chunks, this.sampleRate), { type: 'audio/wav' });
+    return new Blob(encodeWavParts(this.chunks, this.sampleRate, this.bext), { type: 'audio/wav' });
   }
 
   toAudioBuffer(ctx) {

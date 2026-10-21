@@ -1,6 +1,9 @@
 // Runs on the audio thread. Splits the multichannel input into per-channel
 // buffers, sends level meters to the UI, and while recording ships blocks of
-// samples for the armed channels to the main thread.
+// samples for the armed channels to the main thread. It can also decode LTC
+// timecode from one input channel.
+
+import { LtcDecoder } from './timecode.js';
 
 const BLOCK_FRAMES = 4096; // ~85 ms at 48 kHz
 const METER_FRAMES = 1024; // ~21 ms at 48 kHz
@@ -15,6 +18,10 @@ class RecorderProcessor extends AudioWorkletProcessor {
     this.armed = [];
     this.buffers = [];
     this.pos = 0;
+    this.startPending = false;
+    this.ltcChannel = -1;
+    this.ltc = null;
+    this.ltcFrames = [];
     this.port.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -24,7 +31,12 @@ class RecorderProcessor extends AudioWorkletProcessor {
       this.buffers = this.armed.map(() => new Float32Array(BLOCK_FRAMES));
       this.pos = 0;
       this.recording = true;
-      this.port.postMessage({ type: 'started', frame: currentFrame });
+      this.startPending = true; // 'started' goes out with the first recorded block
+    } else if (msg.cmd === 'ltc') {
+      this.ltcChannel = msg.channel; // -1 = off
+      this.ltc = msg.channel >= 0
+        ? new LtcDecoder(sampleRate, (f) => this.ltcFrames.push(f))
+        : null;
     } else if (msg.cmd === 'stop') {
       if (this.recording) this.flush();
       this.recording = false;
@@ -55,7 +67,22 @@ class RecorderProcessor extends AudioWorkletProcessor {
       this.peaks[c] = p;
     }
 
+    if (this.ltc) {
+      const ch = input[this.ltcChannel];
+      // Sample positions count from the context's start, like `frame` in 'started'.
+      if (ch) this.ltc.process(ch, currentFrame);
+      if (this.ltcFrames.length) {
+        this.port.postMessage({ type: 'ltc', frames: this.ltcFrames });
+        this.ltcFrames = [];
+      }
+    }
+
     if (this.recording) {
+      if (this.startPending) {
+        // Sample position of the first recorded sample.
+        this.port.postMessage({ type: 'started', frame: currentFrame });
+        this.startPending = false;
+      }
       for (let k = 0; k < this.armed.length; k++) {
         const ch = input[this.armed[k]];
         if (ch) this.buffers[k].set(ch, this.pos);

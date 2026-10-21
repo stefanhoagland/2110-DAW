@@ -22,7 +22,10 @@
       <button id="btn-stop" title="Stop (Space)" aria-label="Stop">■</button>
       <button id="btn-play" title="Play (Space)" aria-label="Play">▶</button>
       <button id="btn-rec" class="rec" title="Record (R)" aria-label="Record">●</button>
-      <div id="clock" class="clock">00:00:00.000</div>
+      <div class="clock-box">
+        <div id="clock" class="clock">00:00:00.000</div>
+        <div id="tc-status" class="tc-status" hidden></div>
+      </div>
     </div>
 
     <div class="master-strip">
@@ -56,6 +59,11 @@
       </select>
     </label>
     <span id="device-info" class="muted"></span>
+    <label title="Show external timecode on the clock and stamp recordings with it (Broadcast Wave)">Timecode
+      <select id="sel-tc">
+        <option value="off">Off</option>
+      </select>
+    </label>
     <span class="spacer"></span>
     <button id="btn-folder">Choose save folder</button>
     <span id="folder-info" class="muted"></span>

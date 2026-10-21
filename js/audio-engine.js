@@ -17,6 +17,7 @@ export class AudioEngine extends EventTarget {
     this.playStartOffset = 0;
     this.limiterOn = true;
     this.sinkId = '';
+    this.ltcChannel = -1;
   }
 
   get sampleRate() {
@@ -66,6 +67,7 @@ export class AudioEngine extends EventTarget {
       processorOptions: { channels: MAX_CHANNELS },
     });
     this.recorder.port.onmessage = (e) => this.dispatchEvent(new CustomEvent(e.data.type, { detail: e.data }));
+    this.recorder.port.postMessage({ cmd: 'ltc', channel: this.ltcChannel });
     this.source.connect(this.recorder);
     this.recorder.connect(this.ctx.destination); // outputs silence; keeps the node running
 
@@ -134,6 +136,28 @@ export class AudioEngine extends EventTarget {
     const track = this.stream && this.stream.getAudioTracks()[0];
     const inLat = (track && track.getSettings().latency) || 0;
     return inLat + (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0);
+  }
+
+  // Decode LTC timecode from this input channel (0-based), or -1 for none.
+  // Decoded frames arrive as 'ltc' events: { frames: [{ h, m, s, f, df, pos }] }.
+  setLtcChannel(channel) {
+    this.ltcChannel = channel;
+    if (this.recorder) this.recorder.port.postMessage({ cmd: 'ltc', channel });
+  }
+
+  // The current audio input position, in samples, in the count the recorder
+  // worklet uses (the 'started' frame and LTC positions), for a moment given
+  // in performance.now() milliseconds (default: now). Approximate (~ms).
+  inputFrameAt(perfMs = performance.now()) {
+    if (!this.ctx) return 0;
+    const sr = this.ctx.sampleRate;
+    const ts = this.ctx.getOutputTimestamp ? this.ctx.getOutputTimestamp() : null;
+    if (ts && ts.performanceTime > 0 && ts.contextTime > 0) {
+      return (ts.contextTime + (perfMs - ts.performanceTime) / 1000 + this.latency) * sr;
+    }
+    const track = this.stream && this.stream.getAudioTracks()[0];
+    const inLat = (track && track.getSettings().latency) || 0;
+    return (this.ctx.currentTime + inLat + (perfMs - performance.now()) / 1000) * sr;
   }
 
   startRecording(armed) {
