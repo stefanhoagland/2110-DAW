@@ -65,6 +65,10 @@ namespace aes67
             bool receiving = false;         // packets in the last second
             juce::int64 packets = 0, lost = 0;
             int dropouts = 0;               // times the buffer ran dry
+            double bufferMs = 0.0;          // buffer in use (raised automatically after dropouts)
+            double maxGapMs = 0.0;          // longest wait between packets lately
+            double lowestMs = 0.0;          // least audio left in the buffer lately
+            double driftPpm = 0.0;          // sender's clock against the audio interface
         };
         std::vector<Status> status() const;
 
@@ -73,6 +77,10 @@ namespace aes67
 
         // Audio thread: fills `dest[0..numChannels)` with numSamples at the device rate.
         void pull (float* const* dest, int numDest, int numSamples, double deviceRate);
+
+        // A plain-text summary of every stream's health, for troubleshooting.
+        juce::String report() const;
+        void resetStats(); // starts the "lately" figures over
 
         juce::String saveState() const;
         void loadState (const juce::String& json);

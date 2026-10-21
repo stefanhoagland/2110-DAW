@@ -238,7 +238,11 @@ public:
         if (deviceRate <= 0.0 || n > (int) discard.size()) { silence(); return; }
 
         const double base = info.rate / deviceRate; // stream samples per device sample
-        const double target = latencyMs * 0.001 * info.rate + n * base;
+        // Each dropout adds 2 ms to this stream's buffer (up to 40 ms more), so a network
+        // that's jumpier than the setting allows settles instead of glitching again.
+        const double bufferMs = latencyMs + extraMs.load (std::memory_order_relaxed);
+        bufferInUseMs.store (bufferMs, std::memory_order_relaxed);
+        const double target = bufferMs * 0.001 * info.rate + n * base;
         const int avail = fifo.getNumReady();
         if (buffering)
         {
@@ -262,6 +266,7 @@ public:
         if (fifo.getNumReady() < need)
         {
             ++dropouts;
+            extraMs.store (jmin (40.0, extraMs.load (std::memory_order_relaxed) + 2.0), std::memory_order_relaxed);
             buffering = true;
             silence();
             return;
@@ -281,6 +286,17 @@ public:
             used = interp[(size_t) c].process (ratio, tmp.getReadPointer (c), out, n);
         }
         fifo.finishedRead (jmin (used, need));
+        // For the report: how close the buffer came to empty, and the clock difference.
+        const double leftMs = 1000.0 * fifo.getNumReady() / info.rate;
+        if (leftMs < lowestLeftMs.load (std::memory_order_relaxed)) lowestLeftMs.store (leftMs, std::memory_order_relaxed);
+        drift += 0.001 * ((ratio / base - 1.0) * 1.0e6 - drift); // slow, to show the steady correction
+        driftPpm.store (drift, std::memory_order_relaxed);
+    }
+
+    void resetStats()
+    {
+        maxGapMs = 0.0;
+        lowestLeftMs = 1.0e9;
     }
 
     StreamInfo info;
@@ -288,6 +304,7 @@ public:
     std::atomic<int64> packets { 0 }, lost { 0 };
     std::atomic<int> dropouts { 0 };
     std::atomic<uint32> lastPacketMs { 0 };
+    std::atomic<double> extraMs { 0.0 }, bufferInUseMs { 0.0 }, maxGapMs { 0.0 }, lowestLeftMs { 1.0e9 }, driftPpm { 0.0 };
     int firstChannel = 0;
 
 private:
@@ -328,6 +345,10 @@ private:
             packet[(size_t) k] = (float) v * (1.0f / 2147483648.0f);
         }
         push (packet.data(), frames);
+        const double now = Time::getMillisecondCounterHiRes();
+        if (lastArrival > 0.0 && now - lastArrival > maxGapMs.load (std::memory_order_relaxed))
+            maxGapMs.store (now - lastArrival, std::memory_order_relaxed);
+        lastArrival = now;
         ++packets;
         lastPacketMs = Time::getMillisecondCounter();
     }
@@ -357,7 +378,7 @@ private:
     std::vector<LagrangeInterpolator> interp;
     bool buffering = true, haveSeq = false;
     uint16 lastSeq = 0;
-    double fill = 0.0;
+    double fill = 0.0, drift = 0.0, lastArrival = 0.0;
 };
 
 //==============================================================================
@@ -533,6 +554,10 @@ std::vector<NetworkAudio::Status> NetworkAudio::status() const
         s.lost = r->lost.load();
         s.dropouts = r->dropouts.load();
         s.receiving = s.packets > 0 && now - r->lastPacketMs.load() < 1000;
+        s.bufferMs = r->bufferInUseMs.load();
+        s.maxGapMs = r->maxGapMs.load();
+        s.lowestMs = r->lowestLeftMs.load() > 1.0e8 ? 0.0 : r->lowestLeftMs.load();
+        s.driftPpm = r->driftPpm.load();
         out.push_back (s);
     }
     return out;
@@ -550,6 +575,33 @@ void NetworkAudio::pull (float* const* dest, int numDest, int numSamples, double
     for (auto& r : live)
         if (r->firstChannel < numDest)
             r->read (dest + r->firstChannel, numDest - r->firstChannel, numSamples, deviceRate, latency);
+}
+
+void NetworkAudio::resetStats()
+{
+    for (auto& r : receivers) r->resetStats();
+}
+
+String NetworkAudio::report() const
+{
+    String t;
+    t << "AES67 report " << Time::getCurrentTime().toString (true, true) << "\n";
+    String port = iface;
+    for (auto& i : localInterfaces()) if (i.ip == iface) port = i.name + " " + i.ip;
+    t << "Network port: " << port << "   Buffer setting: " << String (latencyMs.load(), 0) << " ms\n";
+    const auto list = status();
+    if (list.empty()) t << "No streams are being received.\n";
+    for (auto& s : list)
+    {
+        t << "\n" << s.info.name << "  (" << s.info.format() << ", " << s.info.address << ":" << String (s.info.port)
+          << (s.info.origin.isNotEmpty() ? ", from " + s.info.origin : String()) << ")\n"
+          << "  " << (s.receiving ? "receiving" : "NOT receiving") << ", packets " << String (s.packets)
+          << ", lost " << String (s.lost) << ", dropouts " << String (s.dropouts) << "\n"
+          << "  buffer in use " << String (s.bufferMs, 1) << " ms, lowest left " << String (s.lowestMs, 1)
+          << " ms, longest gap between packets " << String (s.maxGapMs, 1) << " ms, clock correction "
+          << String (roundToInt (s.driftPpm)) << " ppm\n";
+    }
+    return t;
 }
 
 String NetworkAudio::saveState() const

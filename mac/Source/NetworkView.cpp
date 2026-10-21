@@ -75,6 +75,14 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
     };
     addAndMakeVisible (addButton);
     addAndMakeVisible (loadButton);
+    reportButton.setTooltip ("Copy a troubleshooting report of every stream (timing, gaps, dropouts) to paste into a message");
+    reportButton.onClick = [this]
+    {
+        SystemClipboard::copyTextToClipboard ("Audio: " + engine.deviceDescription() + "\n" + engine.network().report());
+        showError ("Report copied. Paste it into a message. The timing figures start over now.");
+        engine.network().resetStats();
+    };
+    addAndMakeVisible (reportButton);
 
     refresh();
     setSize (640, 560);
@@ -174,6 +182,8 @@ void NetworkView::updateStates()
             text = (it->receiving ? "Receiving" : "Waiting for audio") + dot + tracks;
             if (it->lost > 0 || it->dropouts > 0)
                 text << dot << String (it->lost) << " lost packets, " << String (it->dropouts) << " dropouts";
+            if (it->dropouts > 0)
+                text << dot << "buffer " << String (it->bufferMs, 0) << " ms";
             c = it->receiving ? theme::ok : Colour (0xffffd98a);
         }
         r->state.setText (text, dontSendNotification);
@@ -195,7 +205,7 @@ void NetworkView::Row::resized()
     auto b = getLocalBounds().reduced (8, 6);
     if (key.isNotEmpty()) receive.setBounds (b.removeFromLeft (28));
     auto top = b.removeFromTop (20);
-    state.setBounds (top.removeFromRight (jmin (300, top.getWidth() / 2)));
+    state.setBounds (top.removeFromRight (jmin (440, top.getWidth() * 2 / 3)));
     name.setBounds (top);
     detail.setBounds (b);
 }
@@ -220,6 +230,7 @@ void NetworkView::resized()
     addButton.setBounds (buttons.removeFromRight (110));
     buttons.removeFromRight (8);
     loadButton.setBounds (buttons.removeFromRight (130));
+    reportButton.setBounds (buttons.removeFromLeft (110));
     r.removeFromBottom (6);
     sdpText.setBounds (r.removeFromBottom (90));
     sdpLabel.setBounds (r.removeFromBottom (24));
