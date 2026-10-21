@@ -37,6 +37,10 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     clock.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 18.0f, Font::plain));
     clock.setJustificationType (Justification::centred);
     addAndMakeVisible (clock);
+    tcInfo.setFont (FontOptions (11.0f));
+    tcInfo.setJustificationType (Justification::centred);
+    tcInfo.setColour (Label::textColourId, theme::textMuted);
+    addChildComponent (tcInfo);
 
     // Mode tabs. Only the recorder (Studio) exists in the Mac app so far.
     for (auto* t : { &liveTab, &studioTab, &soundcheckTab, &patchTab })
@@ -82,6 +86,9 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     recordButton.setColour (TextButton::textColourOnId, Colours::white);
 
     WebLook::setStyle (audioButton, "primary");
+    timecodeButton.setTooltip ("External timecode: LTC on an input, or MIDI timecode. Takes are stamped with it.");
+    timecodeButton.onClick = [this] { showTimecodeMenu(); };
+    addAndMakeVisible (timecodeButton);
     for (auto* b : { &audioButton, &folderButton, &armAll, &disarmAll, &importButton, &exportButton, &zoomOut, &zoomIn })
         addAndMakeVisible (*b);
     importButton.setTooltip ("Load channel names from a CSV file (Channel, Name)");
@@ -114,6 +121,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     engine.initialise (deviceXml.get());
     engine.devices().addChangeListener (this);
     rebuildTracks();
+    applyTimecode (settings.getValue ("timecode", "off"), false);
     console.loadState (settings.getValue ("live"));
     plugins.onInsertsChanged = [this] (int t) { console.refreshInserts (t); };
     plugins.loadInserts (settings.getValue ("inserts"));
@@ -209,6 +217,7 @@ void MainComponent::resized()
         }
         clockBox = b.removeFromRight (150).withSizeKeepingCentre (150, 34);
         clock.setBounds (clockBox);
+        tcInfo.setBounds (clockBox.getX() - 20, clockBox.getBottom() + 2, clockBox.getWidth() + 40, 14);
         b.removeFromRight (6);
         for (auto* t : { &recordButton, &playButton, &stopButton, &rtzButton })
         {
@@ -222,6 +231,8 @@ void MainComponent::resized()
     {
         auto b = setupBar.reduced (16, 8).withTrimmedBottom (1);
         audioButton.setBounds (b.removeFromLeft (widthOf (audioButton)));
+        b.removeFromLeft (10);
+        timecodeButton.setBounds (b.removeFromLeft (jmin (widthOf (timecodeButton), 240)));
         b.removeFromLeft (10);
         const int folderW = jmin (GlyphArrangement::getStringWidthInt (FontOptions (13.0f), folderInfo.getText()) + 12,
                                   b.getWidth() / 2);
@@ -356,6 +367,7 @@ void MainComponent::changeListenerCallback (ChangeBroadcaster*)
     // Device changed in Audio settings.
     saveDevice();
     rebuildTracks();
+    if (tcSetting.startsWith ("ltc")) applyTimecode (tcSetting, false); // new device: new input names
     console.setNames (trackNames());
     console.refresh();
     patchView.refresh();
@@ -482,8 +494,12 @@ void MainComponent::stopRecording()
         setStatus ("Take " + String (take) + " saved, but the disk fell behind " + String (drops)
                    + " times and some audio is missing. Use a faster drive or a larger buffer.", true);
     else
+    {
+        const auto start = engine.takeTimecode();
         setStatus ("Take " + String (take) + " saved: " + String (files.size()) + " files, "
-                   + String (seconds, 1) + " s");
+                   + String (seconds, 1) + " s"
+                   + (start.seen ? sep1 + "starts at " + tc::toLabel (start.frames, start.rate) : String()));
+    }
 }
 
 void MainComponent::setStatus (const String& text, bool error)
@@ -531,11 +547,7 @@ void MainComponent::timerCallback()
     // Plugins change their own settings in their windows; save them now and then.
     if (++ticks % 300 == 0) plugins.save();
 
-    const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
-    const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;
-    clock.setText (String (h).paddedLeft ('0', 2) + ":" + String (m).paddedLeft ('0', 2) + ":"
-                   + String (s).paddedLeft ('0', 2) + "." + String (ms).paddedLeft ('0', 3), dontSendNotification);
-    clock.setColour (Label::textColourId, rec ? theme::record : theme::text);
+    updateClock (rec, secs);
 
     // Blink the record button while recording, like the web version.
     recordButton.setAlpha (rec && (Time::getMillisecondCounter() / 500) % 2 ? 0.6f : 1.0f);
@@ -554,4 +566,107 @@ bool MainComponent::canQuit()
         return true;
     stopRecording(); // finish the files cleanly rather than lose the take
     return true;
+}
+
+//==============================================================================
+static String elapsedText (double secs)
+{
+    const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
+    const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;
+    return String (h).paddedLeft ('0', 2) + ":" + String (m).paddedLeft ('0', 2) + ":"
+         + String (s).paddedLeft ('0', 2) + "." + String (ms).paddedLeft ('0', 3);
+}
+
+void MainComponent::updateClock (bool rec, double secs)
+{
+    const auto now = engine.timecodeNow();
+    tcInfo.setVisible (now.active);
+    if (! now.active)
+    {
+        clock.setText (elapsedText (secs), dontSendNotification);
+        clock.setColour (Label::textColourId, rec ? theme::record : theme::text);
+        return;
+    }
+    // With a timecode source, the clock shows timecode; the take time moves underneath.
+    clock.setText (now.seen ? tc::toLabel (now.frames, now.rate) : String ("--:--:--:--"), dontSendNotification);
+    clock.setColour (Label::textColourId, ! now.locked ? theme::textMuted : rec ? theme::record : theme::text);
+    const String kind = tcSetting.startsWith ("ltc") ? "LTC" : "MTC";
+    String info = kind + sep1 + (now.locked ? now.rate.name() : String ("no signal"));
+    if (rec) info << sep1 << "REC " << elapsedText (secs).dropLastCharacters (4);
+    tcInfo.setText (info, dontSendNotification);
+    tcInfo.setColour (Label::textColourId, now.locked ? theme::textMuted : Colour (0xffffd98a));
+}
+
+void MainComponent::applyTimecode (const String& setting, bool save)
+{
+    String label = "Off";
+    if (setting.startsWith ("ltc:"))
+    {
+        const int input = setting.fromFirstOccurrenceOf (":", false, false).getIntValue();
+        engine.setTimecodeLtc (input);
+        String name = "In " + String (input + 1);
+        if (auto* dev = engine.devices().getCurrentAudioDevice())
+            if (auto n = dev->getInputChannelNames()[input]; n.isNotEmpty()) name = n;
+        label = "LTC" + sep1 + name;
+        tcSetting = setting;
+    }
+    else if (setting.startsWith ("mtc:"))
+    {
+        const auto id = setting.fromFirstOccurrenceOf (":", false, false);
+        String name;
+        for (auto& d : MidiInput::getAvailableDevices())
+            if (d.identifier == id) name = d.name;
+        if (name.isNotEmpty() && engine.setTimecodeMtc (id))
+        {
+            label = "MTC" + sep1 + name;
+            tcSetting = setting;
+        }
+        else
+        {
+            // Keep the choice so it works again when the MIDI device is plugged back in.
+            engine.setTimecodeOff();
+            tcSetting = "off";
+            setStatus ("The MIDI timecode input isn't connected. Pick it again under Timecode when it is.", true);
+            save = false;
+        }
+    }
+    else
+    {
+        engine.setTimecodeOff();
+        tcSetting = "off";
+    }
+    timecodeButton.setButtonText ("Timecode: " + label);
+    timecodeButton.setToggleState (tcSetting != "off", dontSendNotification);
+    if (save) settings.setValue ("timecode", tcSetting);
+    resized();
+}
+
+void MainComponent::showTimecodeMenu()
+{
+    if (engine.isRecording()) { setStatus ("Stop recording before changing the timecode source.", true); return; }
+    PopupMenu menu, ltc, mtc;
+    StringArray inputs;
+    if (auto* dev = engine.devices().getCurrentAudioDevice())
+        inputs = dev->getInputChannelNames();
+    for (int i = 0; i < inputs.size(); ++i)
+        ltc.addItem (100 + i, String (i + 1) + "  " + inputs[i], true, tcSetting == "ltc:" + String (i));
+    const auto midi = MidiInput::getAvailableDevices();
+    for (int i = 0; i < midi.size(); ++i)
+        mtc.addItem (10000 + i, midi[i].name, true, tcSetting == "mtc:" + midi[i].identifier);
+    if (midi.isEmpty()) mtc.addItem (-1, "No MIDI inputs found", false, false);
+
+    menu.addSectionHeader ("Timecode source");
+    menu.addItem (1, "Off (show take time)", true, tcSetting == "off");
+    menu.addSubMenu ("LTC on an audio input", ltc, ! inputs.isEmpty(), nullptr, tcSetting.startsWith ("ltc"));
+    menu.addSubMenu ("MIDI timecode (MTC)", mtc, true, nullptr, tcSetting.startsWith ("mtc"));
+    menu.addSeparator();
+    menu.addItem (-1, "Frame rate is detected automatically. Takes are stamped", false, false);
+    menu.addItem (-1, "with their start timecode (Broadcast WAV).", false, false);
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (timecodeButton),
+                        [this, midi] (int r)
+                        {
+                            if (r == 1) applyTimecode ("off", true);
+                            else if (r >= 10000 && r - 10000 < midi.size()) applyTimecode ("mtc:" + midi[r - 10000].identifier, true);
+                            else if (r >= 100 && r < 10000) applyTimecode ("ltc:" + String (r - 100), true);
+                        });
 }

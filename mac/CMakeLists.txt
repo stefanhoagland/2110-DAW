@@ -34,7 +34,8 @@ target_sources(DAW2110 PRIVATE
   Source/Console.cpp
   Source/Patch.cpp
   Source/Plugins.cpp
-  Source/Names.cpp)
+  Source/Names.cpp
+  Source/Timecode.cpp)
 
 target_compile_definitions(DAW2110 PRIVATE
   JUCE_WEB_BROWSER=0
@@ -61,7 +62,12 @@ add_executable(NamesTest Source/Names.cpp Tests/NamesTest.cpp)
 target_link_libraries(NamesTest PRIVATE juce::juce_core juce::juce_recommended_config_flags)
 target_compile_definitions(NamesTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
 
-add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Tests/EngineTest.cpp)
+add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Source/Timecode.cpp Tests/EngineTest.cpp)
 target_link_libraries(EngineTest PRIVATE juce::juce_audio_devices juce::juce_audio_formats juce::juce_audio_processors juce::juce_events
   juce::juce_recommended_config_flags)
 target_compile_definitions(EngineTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+
+# Timecode maths, LTC decoding of a generated signal, MTC and BWF stamping.
+add_executable(TimecodeTest Source/Timecode.cpp Tests/TimecodeTest.cpp)
+target_link_libraries(TimecodeTest PRIVATE juce::juce_core juce::juce_recommended_config_flags)
+target_compile_definitions(TimecodeTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
