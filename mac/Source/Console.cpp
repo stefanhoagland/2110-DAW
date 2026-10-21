@@ -83,7 +83,32 @@ static void smallLabel (Label& l, const String& text, Justification j, Colour c)
     l.setInterceptsMouseClicks (false, false);
 }
 
-ChannelStrip::ChannelStrip (AudioEngine& e, int ch) : engine (e), index (ch)
+void InsertItem::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (bypass ? theme::background : theme::panel2);
+    g.fillRoundedRectangle (r, 4.0f);
+    g.setColour (isMouseOver() ? theme::accent : theme::line);
+    g.drawRoundedRectangle (r, 4.0f, 1.0f);
+    g.setColour (bypass ? theme::textMuted : theme::text);
+    g.setFont (FontOptions (11.0f));
+    g.drawFittedText (name, getLocalBounds().reduced (5, 0), Justification::centredLeft, 1, 0.8f);
+    if (bypass)
+    {
+        g.setColour (theme::textMuted.withAlpha (0.6f));
+        g.drawLine (r.getX() + 4.0f, r.getCentreY(), r.getRight() - 4.0f, r.getCentreY());
+    }
+}
+
+void InsertItem::mouseUp (const MouseEvent& e)
+{
+    if (! getLocalBounds().contains (e.getPosition())) return;
+    if (e.mods.isPopupMenu()) host.showInsertMenu (track, index, *this);
+    else if (e.mods.isAltDown()) host.toggleBypass (track, index);
+    else host.openEditor (track, index);
+}
+
+ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e), host (h), index (ch)
 {
     smallLabel (number, String (ch + 1), Justification::bottomLeft, theme::textMuted);
     number.setFont (FontOptions (11.0f));
@@ -136,7 +161,24 @@ ChannelStrip::ChannelStrip (AudioEngine& e, int ch) : engine (e), index (ch)
 
     meter.setTooltip ("Level after the fader. Click to reset the peak.");
     addAndMakeVisible (meter);
+
+    WebLook::setStyle (addPlugin, "small-plain");
+    addPlugin.setTooltip ("Add a VST3 or Audio Unit plugin to this channel");
+    addPlugin.onClick = [this] { host.showAddMenu (index, addPlugin); };
+    addAndMakeVisible (addPlugin);
     refreshFromEngine();
+    refreshInserts();
+}
+
+void ChannelStrip::refreshInserts()
+{
+    insertItems.clear();
+    auto list = engine.getInserts (index);
+    for (int i = 0; i < (int) list.size(); ++i)
+        addAndMakeVisible (insertItems.add (new InsertItem (host, index, i, list[(size_t) i]->description.name,
+                                                            list[(size_t) i]->bypass.load())));
+    addPlugin.setVisible ((int) list.size() < AudioEngine::maxInserts);
+    resized();
 }
 
 void ChannelStrip::refreshFromEngine()
@@ -188,6 +230,19 @@ void ChannelStrip::resized()
         r.removeFromTop (6);
     };
     knob (gainLabel, gainValue, gain);
+
+    // Inserts: one row per plugin, then "+ Plugin" (the web keeps 128 px for this).
+    insertArea = r.removeFromTop (128);
+    {
+        auto a = insertArea;
+        for (auto* item : insertItems)
+        {
+            item->setBounds (a.removeFromTop (20));
+            a.removeFromTop (3);
+        }
+        addPlugin.setBounds (a.removeFromTop (22));
+    }
+    r.removeFromTop (6);
     knob (panLabel, panValue, pan);
 
     auto buttons = r.removeFromBottom (22);
@@ -231,8 +286,11 @@ void ChannelStrip::paint (Graphics& g)
 }
 
 //==============================================================================
-ConsoleView::ConsoleView (AudioEngine& e) : engine (e)
+ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
 {
+    pluginsButton.setTooltip ("Find installed VST3 and Audio Unit plugins");
+    pluginsButton.onClick = [this] { host.showScanner(); };
+    addAndMakeVisible (pluginsButton);
     goLive.setTooltip ("Send the live mix to the output");
     goLive.setColour (TextButton::buttonOnColourId, theme::record);
     goLive.setColour (TextButton::textColourOnId, Colours::white);
@@ -274,7 +332,7 @@ void ConsoleView::rebuild (int n, const StringArray& names)
         strips.clear();
         for (int i = 0; i < n; ++i)
         {
-            auto* s = strips.add (new ChannelStrip (engine, i));
+            auto* s = strips.add (new ChannelStrip (engine, host, i));
             s->onChange = [this] { if (onChange) onChange(); };
             stripHolder.addAndMakeVisible (s);
         }
@@ -318,6 +376,12 @@ void ConsoleView::refresh()
     resized();
 }
 
+void ConsoleView::refreshInserts (int track)
+{
+    for (auto* s : strips)
+        if (s->channel() == track) s->refreshInserts();
+}
+
 void ConsoleView::tick()
 {
     for (auto* s : strips) s->tick();
@@ -340,6 +404,8 @@ void ConsoleView::resized()
     bar.removeFromLeft (12);
     latency.setBounds (bar.removeFromLeft (width (latency.getText()) + 10));
     bar.removeFromLeft (12);
+    pluginsButton.setBounds (bar.removeFromRight (width ("Plugins...") + 22));
+    bar.removeFromRight (12);
     hint.setBounds (bar);
 
     viewport.setBounds (r);

@@ -31,6 +31,39 @@ struct FakeDevice : AudioIODevice
     BigInteger active, activeOut;
 };
 
+// A minimal "plugin" for the insert tests: multiplies by a gain, mono or stereo.
+struct GainPlugin : AudioPluginInstance
+{
+    explicit GainPlugin (float g, bool monoOk = true)
+        : AudioPluginInstance (BusesProperties().withInput ("In", AudioChannelSet::stereo()).withOutput ("Out", AudioChannelSet::stereo())),
+          gain (g), allowMono (monoOk) {}
+    void fillInPluginDescription (PluginDescription& d) const override { d.name = "Test Gain"; d.pluginFormatName = "Test"; }
+    const String getName() const override { return "Test Gain"; }
+    void prepareToPlay (double, int) override { prepared = true; }
+    void releaseResources() override {}
+    void processBlock (AudioBuffer<float>& b, MidiBuffer&) override { b.applyGain (gain); lastChannels = b.getNumChannels(); }
+    bool isBusesLayoutSupported (const BusesLayout& l) const override
+    {
+        auto in = l.getMainInputChannelSet(), out = l.getMainOutputChannelSet();
+        return in == out && (in == AudioChannelSet::stereo() || (allowMono && in == AudioChannelSet::mono()));
+    }
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const String&) override {}
+    void getStateInformation (MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+    float gain;
+    bool allowMono, prepared = false;
+    int lastChannels = 0;
+};
+
 static int failures = 0;
 static void check (bool ok, const String& what)
 {
@@ -169,6 +202,36 @@ int main()
     engine.resetPatches();
     run (2);
     check (engine.takePeak (0) > 0.49f && engine.getPatch (AudioEngine::mixLeft, 0) && ! engine.getPatch (AudioEngine::mixLeft, 4), "reset to 1:1");
+
+    // ---- Plugin inserts ----
+    engine.strip (2).faderDb = -60.0f;
+    engine.setLimiter (false); // measure the plugins, not the limiter's recovery from the earlier +30 dB test
+    engine.setLive (true);
+    auto [b0, b0r] = run (4);
+    auto half = std::make_unique<GainPlugin> (0.5f);
+    auto* halfPtr = half.get();
+    check (engine.addInsert (0, std::move (half), {}), "insert added");
+    check (halfPtr->prepared && halfPtr->getTotalNumInputChannels() == 1, "insert prepared, running mono");
+    auto [b1, b1r] = run (4);
+    check (std::abs (b1 - 0.5f * b0) < 0.01f, "insert halves the level (" + String (b0) + " -> " + String (b1) + ")");
+    engine.takeStripPeak (0);
+    run (2);
+    check (std::abs (engine.takeStripPeak (0) - 0.25f) < 0.01f, "strip meter is after the inserts");
+
+    auto stereoOnly = std::make_unique<GainPlugin> (2.0f, false);
+    auto* stereoPtr = stereoOnly.get();
+    engine.addInsert (0, std::move (stereoOnly), {});
+    auto [b2, b2r] = run (4);
+    check (stereoPtr->lastChannels == 2 && std::abs (b2 - b0) < 0.01f, "stereo-only plugin runs in stereo, chain 0.5 x 2 = unity");
+    engine.getInserts (0)[0]->bypass = true;
+    auto [b3, b3r] = run (4);
+    check (std::abs (b3 - 2.0f * b0) < 0.02f, "bypass skips a plugin");
+    engine.moveInsert (0, 1, 0);
+    check (engine.getInserts (0)[0]->plugin.get() == stereoPtr, "move changes the order");
+    engine.removeInsert (0, 0);
+    engine.removeInsert (0, 0);
+    auto [b4, b4r] = run (4);
+    check (engine.getInserts (0).empty() && std::abs (b4 - b0) < 0.01f, "removing plugins restores the dry level");
 
     dir.deleteRecursively();
     std::cout << (failures ? "FAILED\n" : "ALL PASSED\n");

@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 
 // Audio input, metering, multitrack recording and the live mix.
 // Every input channel of the interface is a track. While recording, each armed
@@ -68,6 +69,26 @@ public:
 
     static float faderGain (float db) { return db <= -60.0f ? 0.0f : juce::Decibels::decibelsToGain (db); }
 
+    // ---- Plugin inserts (VST3 / AU) ----
+    // Each track runs trim -> its inserts in order (skipping bypassed ones) -> fader,
+    // like the web version. Plugins run mono if they support it, otherwise in
+    // stereo with the input on both sides and the two outputs averaged.
+    struct Insert
+    {
+        std::unique_ptr<juce::AudioPluginInstance> plugin;
+        juce::PluginDescription description;
+        std::atomic<bool> bypass { false };
+        int channels = 1; // channels the plugin runs with
+    };
+    using InsertList = std::vector<std::shared_ptr<Insert>>;
+    static constexpr int maxInserts = 8;
+
+    // Takes the plugin, sets its channel layout and prepares it. False if the list is full.
+    bool addInsert (int track, std::unique_ptr<juce::AudioPluginInstance>, const juce::PluginDescription&, bool bypass = false);
+    void removeInsert (int track, int index);
+    void moveInsert (int track, int from, int to);
+    InsertList getInserts (int track) const; // message thread
+
     // ---- Patching ----
     // Input patch: which device input feeds each track (-1 = none). Default is 1:1.
     // Tracks are what Studio records and what the Live strips mix.
@@ -101,6 +122,13 @@ private:
     std::array<std::atomic<int>, maxChannels> trackSource;
     std::array<std::atomic<bool>, (size_t) numSources * maxChannels> patch {};
     std::array<const float*, maxChannels> trackIn {}; // audio thread only
+    std::array<float, maxChannels> lastTrim {};
+    std::array<InsertList, maxChannels> inserts;           // swapped by the message thread
+    mutable std::array<juce::SpinLock, maxChannels> insertLocks; // audio thread only try-locks
+    juce::AudioBuffer<float> fx;
+    juce::MidiBuffer midi;
+    void prepare (Insert&) const;
+    void runInserts (int track, float* samples, int numSamples);
     std::atomic<int> inputCount { 0 };
     std::atomic<double> currentRate { 0.0 };
 

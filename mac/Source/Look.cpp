@@ -23,6 +23,17 @@ WebLook::WebLook()
     setColour (TooltipWindow::textColourId, theme::text);
     setColour (TooltipWindow::outlineColourId, theme::line);
     setColour (ScrollBar::thumbColourId, theme::line);
+    setColour (PopupMenu::backgroundColourId, theme::panel2);
+    setColour (PopupMenu::textColourId, theme::text);
+    setColour (PopupMenu::headerTextColourId, theme::textMuted);
+    setColour (PopupMenu::highlightedBackgroundColourId, theme::accent);
+    setColour (PopupMenu::highlightedTextColourId, theme::accentText);
+    setColour (AlertWindow::backgroundColourId, theme::panel);
+    setColour (AlertWindow::textColourId, theme::text);
+    setColour (ListBox::backgroundColourId, theme::background);
+    setColour (ListBox::textColourId, theme::text);
+    setColour (TableHeaderComponent::backgroundColourId, theme::panel2);
+    setColour (TableHeaderComponent::textColourId, theme::text);
 }
 
 void WebLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool over, bool down)
@@ -69,6 +80,7 @@ Font WebLook::getTextButtonFont (TextButton& b, int)
     const auto style = styleOf (b);
     if (style == "transport") return FontOptions (15.0f);
     if (style == "small") return FontOptions (11.0f, Font::bold);
+    if (style == "small-plain") return FontOptions (11.0f);
     if (style == "primary" || style == "bold" || (style == "mode" && b.getToggleState())) return FontOptions (13.0f, Font::bold);
     return FontOptions (13.0f);
 }
