@@ -128,6 +128,7 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
     gain.setDoubleClickReturnValue (true, 0.0);
     gain.setTooltip ("Input gain (trim). Double-click to reset.");
     pan.setRange (-1.0, 1.0, 0.01);
+    WebLook::setStyle (pan, "pan");
     pan.setDoubleClickReturnValue (true, 0.0);
     pan.setTooltip ("Pan. Double-click to centre.");
     fader.setSliderStyle (Slider::LinearVertical);

@@ -163,8 +163,10 @@ int main()
     engine.strip (5).solo = false;
 
     engine.strip (0).mute = true;
+    engine.takeStripPeak (0);
     auto [l5, r5] = run (4);
     check (l5 == 0.0f, "mute");
+    check (engine.takeStripPeak (0) > 0.2f, "a muted channel's meter still shows its level");
     engine.strip (0).mute = false;
 
     engine.strip (0).faderDb = 10.0f;

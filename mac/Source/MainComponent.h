@@ -45,6 +45,9 @@ private:
     void showTimecodeMenu();
     void showNetwork();
     void networkChanged();
+    juce::String autoName (int track) const;
+    bool looksAutomatic (const juce::String& saved, int track) const;
+    void applyAutoNames();
     void applyTimecode (const juce::String& setting, bool save);
     void updateClock (bool rec, double secs);
     void saveLive();
@@ -82,6 +85,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };
     juce::Component::SafePointer<juce::DialogWindow> networkWindow;
+    juce::StringArray lastAuto; // each track's automatic name when last set
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

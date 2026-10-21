@@ -196,7 +196,16 @@ void WebLook::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float p
     g.setColour (theme::line.withMultipliedAlpha (alpha));
     g.fillRoundedRectangle (0.0f, cy - 2.0f, (float) s.getWidth(), 4.0f, 2.0f);
     g.setColour (Colour (0xff9cc8ff).withMultipliedAlpha (alpha));
-    g.fillRoundedRectangle (0.0f, cy - 2.0f, pos, 4.0f, 2.0f);
+    if (style == "pan")
+    {
+        // Pan fills out from the centre towards the side it leans to, with a centre mark.
+        const float mid = b.getCentreX(); // where 0 (centre) sits
+        g.fillRoundedRectangle (jmin (mid, pos), cy - 2.0f, std::abs (pos - mid), 4.0f, 2.0f);
+        g.setColour (theme::textMuted.withMultipliedAlpha (alpha));
+        g.fillRect (mid - 0.5f, cy - 5.0f, 1.0f, 10.0f);
+    }
+    else
+        g.fillRoundedRectangle (0.0f, cy - 2.0f, pos, 4.0f, 2.0f);
     g.setColour (theme::accent.withMultipliedAlpha (alpha));
     g.fillEllipse (Rectangle<float> (12.0f, 12.0f).withCentre ({ pos, cy }));
 }
