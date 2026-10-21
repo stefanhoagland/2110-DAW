@@ -91,6 +91,15 @@ String AudioEngine::deviceDescription() const
          + String (1000.0 * buffer / jmax (1.0, rate), 1) + " ms)";
 }
 
+String AudioEngine::inputName (int i) const
+{
+    const int devIns = inputCount.load();
+    if (i >= devIns) return net.channelName (i - devIns);
+    auto* dev = deviceManager.getCurrentAudioDevice();
+    const auto n = dev != nullptr ? dev->getInputChannelNames()[i] : String();
+    return n.isNotEmpty() ? n : "In " + String (i + 1);
+}
+
 float AudioEngine::takePeak (int channel)
 {
     if (! isPositiveAndBelow (channel, maxChannels))
@@ -121,6 +130,7 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
     ltcReset = true;
 
     const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
+    netBuf.setSize (aes67::NetworkAudio::maxNetChannels, block, false, true, false);
     work.setSize (1, block, false, true, false);
     fx.setSize (8, block, false, true, false);
     midi.ensureSize (2048);
@@ -194,11 +204,24 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         }
     }
 
+    // AES67 network channels come after the interface's inputs.
+    const int devIns = jmin (inputCount.load (std::memory_order_relaxed), maxChannels);
+    int netCh = jmin (net.numChannels(), maxChannels - devIns, netBuf.getNumChannels());
+    if (netCh > 0 && numSamples <= netBuf.getNumSamples())
+        net.pull (netBuf.getArrayOfWritePointers(), netCh, numSamples, rate);
+    else
+        netCh = 0;
+
     // Patch: find each track's input.
-    const int tracks = jmin (inputCount.load (std::memory_order_relaxed), maxChannels);
+    const int tracks = devIns + netCh;
     for (int t = 0; t < tracks; ++t)
     {
         const int src = trackSource[(size_t) t].load (std::memory_order_relaxed);
+        if (src >= devIns && src < tracks)
+        {
+            trackIn[(size_t) t] = netBuf.getReadPointer (src - devIns);
+            continue;
+        }
         const int idx = isPositiveAndBelow (src, maxChannels) ? channelToActive[(size_t) src] : -1;
         trackIn[(size_t) t] = isPositiveAndBelow (idx, numIns) ? inputs[idx] : nullptr;
     }

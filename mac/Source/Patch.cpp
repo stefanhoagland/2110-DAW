@@ -202,6 +202,8 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names) : engin
 
 String PatchView::inputName (int i) const
 {
+    if (i >= engine.numDeviceInputs())
+        return "AES67  " + engine.inputName (i);
     auto* dev = engine.devices().getCurrentAudioDevice();
     auto names = dev != nullptr ? dev->getInputChannelNames() : StringArray();
     const auto n = names[i];

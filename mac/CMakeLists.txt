@@ -35,7 +35,9 @@ target_sources(DAW2110 PRIVATE
   Source/Patch.cpp
   Source/Plugins.cpp
   Source/Names.cpp
-  Source/Timecode.cpp)
+  Source/Timecode.cpp
+  Source/Aes67.cpp
+  Source/NetworkView.cpp)
 
 target_compile_definitions(DAW2110 PRIVATE
   JUCE_WEB_BROWSER=0
@@ -62,7 +64,7 @@ add_executable(NamesTest Source/Names.cpp Tests/NamesTest.cpp)
 target_link_libraries(NamesTest PRIVATE juce::juce_core juce::juce_recommended_config_flags)
 target_compile_definitions(NamesTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
 
-add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Source/Timecode.cpp Tests/EngineTest.cpp)
+add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Source/Timecode.cpp Source/Aes67.cpp Tests/EngineTest.cpp)
 target_link_libraries(EngineTest PRIVATE juce::juce_audio_devices juce::juce_audio_formats juce::juce_audio_processors juce::juce_events
   juce::juce_recommended_config_flags)
 target_compile_definitions(EngineTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
@@ -71,3 +73,8 @@ target_compile_definitions(EngineTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE
 add_executable(TimecodeTest Source/Timecode.cpp Tests/TimecodeTest.cpp)
 target_link_libraries(TimecodeTest PRIVATE juce::juce_core juce::juce_recommended_config_flags)
 target_compile_definitions(TimecodeTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
+
+# AES67: SDP and SAP parsing, and receiving RTP audio over the network.
+add_executable(Aes67Test Source/Aes67.cpp Tests/Aes67Test.cpp)
+target_link_libraries(Aes67Test PRIVATE juce::juce_audio_basics juce::juce_events juce::juce_recommended_config_flags)
+target_compile_definitions(Aes67Test PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
