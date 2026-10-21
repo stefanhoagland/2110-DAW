@@ -309,14 +309,17 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         lastTrim[ch] = trim;
         runInserts (t, w, numSamples);
 
-        const float gain = audible ? faderGain (st.faderDb.load (std::memory_order_relaxed)) : 0.0f;
+        // Mute and solo stop the audio, but the meter still shows the level, so you can see
+        // a muted channel is live.
+        const float fader = faderGain (st.faderDb.load (std::memory_order_relaxed));
+        const float gain = audible ? fader : 0.0f;
         // Constant-power pan, the same law as the web's StereoPannerNode for a mono source.
         const float x = (jlimit (-1.0f, 1.0f, st.pan.load (std::memory_order_relaxed)) + 1.0f) * 0.5f;
         const float gl = gain * std::cos (x * MathConstants<float>::halfPi);
         const float gr = gain * std::sin (x * MathConstants<float>::halfPi);
 
         // Post-fader meter (before pan), like the web strip meter.
-        storeMax (stripPeaks[ch], gain * work.getMagnitude (0, 0, numSamples));
+        storeMax (stripPeaks[ch], fader * work.getMagnitude (0, 0, numSamples));
 
         if (gl > 0.0f || gr > 0.0f || lastL[ch] > 0.0f || lastR[ch] > 0.0f)
         {

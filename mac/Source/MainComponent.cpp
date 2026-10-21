@@ -57,7 +57,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     patchTab.setTooltip ("Patch interface inputs to tracks, and sources to interface outputs");
 
     addChildComponent (patchView);
-    patchView.onChange = [this] { savePatch(); console.refresh(); console.setNames (trackNames()); };
+    patchView.onChange = [this] { savePatch(); applyAutoNames(); console.refresh(); console.setNames (trackNames()); };
     PatchView::loadInputs (engine, settings.getValue ("patchIn"));
     PatchView::loadOutputs (engine, settings.getValue ("patchOut"));
 
@@ -292,9 +292,9 @@ void MainComponent::rebuildTracks()
     for (int i = 0; i < n; ++i)
     {
         auto* row = rows.add (new TrackRow (i));
-        // Network tracks start out named after their stream.
-        row->setName (savedNames[i].isNotEmpty() ? savedNames[i]
-                      : i >= engine.numDeviceInputs() ? engine.inputName (i) : names::defaultName (i));
+        // Tracks you haven't renamed are named after what feeds them (e.g. an AES67 stream).
+        row->setName (looksAutomatic (savedNames[i], i) ? autoName (i) : savedNames[i]);
+        lastAuto.set (i, autoName (i));
         row->setArmed (armed.isEmpty() ? true : armed[i] == '1');
         row->onChange = [this] { saveTracks(); };
         row->onMoveFocus = [this, i] (int d)
@@ -360,7 +360,8 @@ void MainComponent::saveTracks()
     while (armed.length() < rows.size()) armed << '1';
     for (auto* r : rows)
     {
-        all.set (r->channel(), r->getName());
+        // An automatic name is stored as blank, so it can follow the track's source later.
+        all.set (r->channel(), r->getName() == autoName (r->channel()) ? String() : r->getName());
         armed = armed.replaceSection (r->channel(), 1, r->isArmed() ? "1" : "0");
     }
     settings.setValue ("names", all.joinIntoString ("\n"));
@@ -707,8 +708,48 @@ void MainComponent::networkChanged()
     if (engine.isRecording()) return; // tracks change after the take
     saveTracks();
     rebuildTracks();
+    applyAutoNames();
     console.setNames (trackNames());
     console.refresh();
     patchView.refresh();
     refreshLabels();
+}
+
+//==============================================================================
+String MainComponent::autoName (int t) const
+{
+    // A track fed by a network channel takes that channel's name; otherwise "Ch N".
+    const int src = engine.getTrackSource (t);
+    if (src >= engine.numDeviceInputs() && src < engine.numInputs())
+        return engine.inputName (src);
+    return names::defaultName (t);
+}
+
+bool MainComponent::looksAutomatic (const String& saved, int t) const
+{
+    if (saved.isEmpty() || saved == names::defaultName (t) || saved == autoName (t)) return true;
+    // Names saved by earlier versions for network tracks: "<stream name> <n>".
+    const auto stem = saved.upToLastOccurrenceOf (" ", false, false);
+    if (! saved.fromLastOccurrenceOf (" ", false, false).containsOnly ("0123456789")) return false;
+    auto& net = engine.network();
+    for (auto& st : net.status()) if (st.info.name == stem) return true;
+    for (auto& d : net.discovered()) if (d.name == stem) return true;
+    return false;
+}
+
+void MainComponent::applyAutoNames()
+{
+    bool changed = false;
+    for (auto* r : rows)
+    {
+        const int t = r->channel();
+        const auto next = autoName (t);
+        // Streams are announced a few seconds after launch, so old stream names are caught here too.
+        if (r->getName() == lastAuto[t] || looksAutomatic (r->getName(), t))
+        {
+            if (r->getName() != next) { r->setName (next); changed = true; }
+        }
+        lastAuto.set (t, next);
+    }
+    if (changed) saveTracks();
 }

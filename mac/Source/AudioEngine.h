@@ -28,6 +28,7 @@ public:
     int numDeviceInputs() const { return inputCount.load(); }
     juce::String inputName (int input) const; // "In 3", or the network channel's name
     aes67::NetworkAudio& network() { return net; }
+    const aes67::NetworkAudio& network() const { return net; }
     double sampleRate() const { return currentRate.load(); }
     juce::String deviceDescription() const;
 
