@@ -89,6 +89,9 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     timecodeButton.setTooltip ("External timecode: LTC on an input, or MIDI timecode. Takes are stamped with it.");
     timecodeButton.onClick = [this] { showTimecodeMenu(); };
     addAndMakeVisible (timecodeButton);
+    networkButton.setTooltip ("Receive AES67 / SMPTE ST 2110-30 audio streams from the network as extra inputs");
+    networkButton.onClick = [this] { showNetwork(); };
+    addAndMakeVisible (networkButton);
     for (auto* b : { &audioButton, &folderButton, &armAll, &disarmAll, &importButton, &exportButton, &zoomOut, &zoomIn })
         addAndMakeVisible (*b);
     importButton.setTooltip ("Load channel names from a CSV file (Channel, Name)");
@@ -119,6 +122,8 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 
     auto deviceXml = settings.getXmlValue ("audioDevice");
     engine.initialise (deviceXml.get());
+    engine.network().loadState (settings.getValue ("aes67"));
+    engine.network().onChange = [this] { networkChanged(); };
     engine.devices().addChangeListener (this);
     rebuildTracks();
     applyTimecode (settings.getValue ("timecode", "off"), false);
@@ -138,6 +143,8 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 
 MainComponent::~MainComponent()
 {
+    engine.network().onChange = nullptr;
+    if (networkWindow != nullptr) delete networkWindow.getComponent();
     engine.devices().removeChangeListener (this);
     engine.setLive (false);
     engine.stopRecording();
@@ -234,6 +241,8 @@ void MainComponent::resized()
         b.removeFromLeft (10);
         timecodeButton.setBounds (b.removeFromLeft (jmin (widthOf (timecodeButton), 240)));
         b.removeFromLeft (10);
+        networkButton.setBounds (b.removeFromLeft (widthOf (networkButton)));
+        b.removeFromLeft (10);
         const int folderW = jmin (GlyphArrangement::getStringWidthInt (FontOptions (13.0f), folderInfo.getText()) + 12,
                                   b.getWidth() / 2);
         folderInfo.setBounds (b.removeFromRight (folderW));
@@ -283,7 +292,9 @@ void MainComponent::rebuildTracks()
     for (int i = 0; i < n; ++i)
     {
         auto* row = rows.add (new TrackRow (i));
-        row->setName (savedNames[i].isNotEmpty() ? savedNames[i] : names::defaultName (i));
+        // Network tracks start out named after their stream.
+        row->setName (savedNames[i].isNotEmpty() ? savedNames[i]
+                      : i >= engine.numDeviceInputs() ? engine.inputName (i) : names::defaultName (i));
         row->setArmed (armed.isEmpty() ? true : armed[i] == '1');
         row->onChange = [this] { saveTracks(); };
         row->onMoveFocus = [this, i] (int d)
@@ -521,7 +532,9 @@ void MainComponent::setStatus (const String& text, bool error)
 
 void MainComponent::refreshLabels()
 {
-    deviceInfo.setText (engine.deviceDescription(), dontSendNotification);
+    const int netCh = engine.numInputs() - engine.numDeviceInputs();
+    deviceInfo.setText (engine.deviceDescription() + (netCh > 0 ? sep + "+ " + String (netCh) + " AES67" : String()),
+                        dontSendNotification);
     const auto free = folder.getBytesFreeOnVolume();
     const double rate = jmax (44100.0, engine.sampleRate());
     const double hours = free > 0 ? (double) free / (rate * 3.0 * jmax (1, engine.numInputs()) * 3600.0) : 0.0;
@@ -534,6 +547,8 @@ void MainComponent::refreshLabels()
 void MainComponent::timerCallback()
 {
     const bool rec = engine.isRecording();
+    // Network streams added during a take become tracks once it ends.
+    if (! rec && engine.numInputs() > 0 && engine.numInputs() != rows.size()) networkChanged();
     const double secs = rec ? engine.recordedSeconds() : lastTakeSeconds;
     for (auto* r : rows)
     {
@@ -669,4 +684,31 @@ void MainComponent::showTimecodeMenu()
                             else if (r >= 10000 && r - 10000 < midi.size()) applyTimecode ("mtc:" + midi[r - 10000].identifier, true);
                             else if (r >= 100 && r < 10000) applyTimecode ("ltc:" + String (r - 100), true);
                         });
+}
+
+//==============================================================================
+void MainComponent::showNetwork()
+{
+    if (networkWindow != nullptr) { networkWindow->toFront (true); return; }
+    DialogWindow::LaunchOptions o;
+    o.content.setOwned (new NetworkView (engine));
+    o.dialogTitle = "AES67 network audio";
+    o.dialogBackgroundColour = theme::panel;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    networkWindow = o.launchAsync();
+}
+
+void MainComponent::networkChanged()
+{
+    settings.setValue ("aes67", engine.network().saveState());
+    if (networkWindow != nullptr)
+        if (auto* v = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) v->refresh();
+    if (engine.isRecording()) return; // tracks change after the take
+    saveTracks();
+    rebuildTracks();
+    console.setNames (trackNames());
+    console.refresh();
+    patchView.refresh();
+    refreshLabels();
 }

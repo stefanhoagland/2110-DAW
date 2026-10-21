@@ -2,6 +2,7 @@
 // the WAV files it writes. Run: ./EngineTest
 #include "../Source/AudioEngine.h"
 #include "LtcSignal.h"
+#include "RtpSender.h"
 #include <iostream>
 
 using namespace juce;
@@ -275,6 +276,39 @@ int main()
 
         engine.setTimecodeOff();
         check (! engine.timecodeNow().active, "timecode off");
+    }
+
+    // ---- AES67 network inputs ----
+    {
+        auto& net = engine.network();
+        net.setInterface ("127.0.0.1");
+        aes67::StreamInfo info;
+        String why;
+        aes67::parseSdp ("v=0\no=- 9 9 IN IP4 127.0.0.1\ns=Net\nc=IN IP4 127.0.0.1\nm=audio 46010 RTP/AVP 98\n"
+                         "a=rtpmap:98 L24/48000/8\na=ptime:1\n", info, why);
+        check (net.subscribe (info).isEmpty(), "network stream subscribed");
+        check (engine.numInputs() == 72 && engine.numDeviceInputs() == 64, "8 network channels become tracks 65-72");
+        check (engine.inputName (66) == "Net 3", "network track named after the stream");
+        RtpSender tx;
+        tx.open ("127.0.0.1", 46010);
+        AudioBuffer<float> small (64, 48), outs (8, 48);
+        small.clear();
+        const auto start = Time::getMillisecondCounterHiRes();
+        for (int i = 0; i < 400; ++i)
+        {
+            tx.send (48, [] (int, int c) { return c == 2 ? 0.3f : 0.0f; });
+            while (Time::getMillisecondCounterHiRes() - start < i + 1.0) Thread::yield();
+            engine.takePeak (66);
+            engine.audioDeviceIOCallbackWithContext (small.getArrayOfReadPointers(), 64, outs.getArrayOfWritePointers(), 8, 48, ctx);
+        }
+        check (std::abs (engine.takePeak (66) - 0.3f) < 0.001f, "network channel 3 reaches track 67's meter");
+        engine.setTrackSource (0, 66);
+        engine.takePeak (0); // clear what earlier tests left
+        engine.audioDeviceIOCallbackWithContext (small.getArrayOfReadPointers(), 64, outs.getArrayOfWritePointers(), 8, 48, ctx);
+        { const float p0 = engine.takePeak (0); check (std::abs (p0 - 0.3f) < 0.001f, "a network channel can be patched to track 1 (" + String (p0) + ")"); }
+        engine.setTrackSource (0, 0);
+        net.unsubscribe (info.key());
+        check (engine.numInputs() == 64, "unsubscribing removes the network tracks");
     }
 
     dir.deleteRecursively();

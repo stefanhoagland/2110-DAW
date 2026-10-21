@@ -3,6 +3,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "Timecode.h"
+#include "Aes67.h"
 
 // Audio input, metering, multitrack recording and the live mix.
 // Every input channel of the interface is a track. While recording, each armed
@@ -22,7 +23,11 @@ public:
     // Opens the saved device setup (or the default device) with every input enabled.
     void initialise (const juce::XmlElement* savedState);
 
-    int numInputs() const { return inputCount.load(); }   // device inputs = number of tracks
+    // Tracks: the interface's inputs, then any AES67 network channels.
+    int numInputs() const { return juce::jmin (maxChannels, inputCount.load() + net.numChannels()); }
+    int numDeviceInputs() const { return inputCount.load(); }
+    juce::String inputName (int input) const; // "In 3", or the network channel's name
+    aes67::NetworkAudio& network() { return net; }
     double sampleRate() const { return currentRate.load(); }
     juce::String deviceDescription() const;
 
@@ -155,6 +160,8 @@ private:
     void prepare (Insert&) const;
     void runInserts (int track, float* samples, int numSamples);
     std::atomic<int> inputCount { 0 };
+    aes67::NetworkAudio net;
+    juce::AudioBuffer<float> netBuf; // network channels for this block
     std::atomic<double> currentRate { 0.0 };
 
     std::array<Strip, maxChannels> strips;

@@ -19,6 +19,8 @@ no 32-channel cap, low latency, and (coming next) VST3/AU plugins.
 
 - **Timecode**: click **Timecode** in the setup bar to follow external timecode, either LTC on one of your interface inputs or MIDI timecode (MTC) from a MIDI input. The frame rate (23.976, 24, 25, 29.97, 29.97 drop-frame, 30) is detected automatically. The clock then shows the timecode (dimmed with "no signal" if it stops), and every take is stamped with the timecode of its first sample as a Broadcast WAV, so Pro Tools, Logic, Reaper and others can place the files at the right time.
 
+- **AES67 network audio**: click **AES67 network** in the setup bar to receive AES67 / SMPTE ST 2110-30 streams with no driver to install. Pick the network port on your media network; streams announced with SAP are listed automatically, or paste/load a stream's SDP. Tick a stream and its channels become tracks after your interface's inputs (up to 128 network channels), ready to record, mix and patch. Uncompressed L16/L24 at any packet time is supported. The app follows each stream's clock by resampling gently against your interface, so PTP isn't needed to receive; the **Buffer** setting (5 ms by default) trades latency for resilience. Sending AES67 from the app needs PTP and is not built yet.
+
 Coming next: playback and Soundcheck (its track playback will appear as sources in the Outputs grid).
 
 ## Download

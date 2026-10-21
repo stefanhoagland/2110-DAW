@@ -5,6 +5,7 @@
 #include "Look.h"
 #include "Console.h"
 #include "Patch.h"
+#include "NetworkView.h"
 
 // The main window, laid out like the web version's Studio view: top bar with modes and
 // transport, a setup bar (device, save folder), a toolbar, then the tracks and timeline.
@@ -42,6 +43,8 @@ private:
     void setMode (Mode);
     void savePatch();
     void showTimecodeMenu();
+    void showNetwork();
+    void networkChanged();
     void applyTimecode (const juce::String& setting, bool save);
     void updateClock (bool rec, double secs);
     void saveLive();
@@ -62,7 +65,7 @@ private:
     juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" }, patchTab { "Patch" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },
                      playButton { juce::CharPointer_UTF8 ("\xe2\x96\xb6") }, recordButton { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
-    juce::TextButton audioButton { "Audio settings" }, timecodeButton { "Timecode: Off" }, folderButton { "Choose save folder" },
+    juce::TextButton audioButton { "Audio settings" }, timecodeButton { "Timecode: Off" }, networkButton { "AES67 network" }, folderButton { "Choose save folder" },
                      armAll { "Arm all" }, disarmAll { "Disarm all" },
                      importButton { "Import names" }, exportButton { "Export names" },
                      zoomOut { juce::CharPointer_UTF8 ("\xe2\x88\x92") }, zoomIn { "+" };
@@ -78,6 +81,7 @@ private:
     Mode mode = studioMode;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };
+    juce::Component::SafePointer<juce::DialogWindow> networkWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
