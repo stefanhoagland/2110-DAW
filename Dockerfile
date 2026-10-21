@@ -15,7 +15,7 @@ COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/10-make-cert.sh /docker-entrypoint.d/10-make-cert.sh
 RUN chmod +x /docker-entrypoint.d/10-make-cert.sh
 
-COPY index.html /usr/share/nginx/html/
+COPY index.html favicon.svg /usr/share/nginx/html/
 COPY css /usr/share/nginx/html/css
 COPY js /usr/share/nginx/html/js
 COPY --from=plugins /bundled-plugins /usr/share/nginx/html/bundled-plugins

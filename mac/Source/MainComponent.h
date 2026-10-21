@@ -45,6 +45,7 @@ private:
     double lastTakeSeconds = 0.0;
 
     WebLook look;
+    std::unique_ptr<juce::Drawable> logo;
     juce::Label deviceInfo, folderInfo, clock, takeInfo, notice;
     juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },

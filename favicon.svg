@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262a34"/><stop offset="1" stop-color="#121418"/>
+    </linearGradient>
+    <linearGradient id="wave" gradientUnits="userSpaceOnUse" x1="230" y1="0" x2="794" y2="0">
+      <stop offset="0" stop-color="#4fa3ff"/><stop offset="0.5" stop-color="#8f7dff"/><stop offset="1" stop-color="#ff4757"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#3a3f4c" stroke-width="3"/>
+  <g transform="translate(0 40)" stroke="url(#wave)" stroke-width="22" stroke-linecap="round">
+    <line x1="274.5" y1="616.2" x2="200.9" y2="534.4"/><line x1="299.3" y1="595.1" x2="234.1" y2="507.8"/><line x1="333.3" y1="588.4" x2="262.2" y2="472.4"/><line x1="378.3" y1="608.9" x2="283.0" y2="415.7"/><line x1="399.9" y1="588.1" x2="330.2" y2="406.4"/><line x1="431.0" y1="592.7" x2="370.5" y2="378.1"/><line x1="466.9" y1="636.5" x2="407.7" y2="317.2"/><line x1="486.1" y1="598.0" x2="462.9" y2="345.5"/><line x1="512.0" y1="601.2" x2="512.0" y2="338.8"/><line x1="533.8" y1="642.7" x2="565.2" y2="300.7"/><line x1="564.9" y1="594.7" x2="608.6" y2="359.0"/><line x1="592.8" y1="593.4" x2="653.7" y2="377.4"/><line x1="612.8" y1="617.5" x2="705.1" y2="377.0"/><line x1="657.1" y1="585.7" x2="729.5" y2="438.9"/><line x1="690.3" y1="589.0" x2="762.1" y2="471.8"/><line x1="717.1" y1="605.3" x2="797.5" y2="497.7"/><line x1="755.9" y1="609.2" x2="816.8" y2="541.5"/>
+  </g>
+</svg>
