@@ -18,4 +18,13 @@ public:
     void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int w, int h, bool vertical,
                         int thumbStart, int thumbSize, bool over, bool down) override;
     int getDefaultScrollbarWidth() override { return 10; }
+
+    // Sliders: "fader" (vertical console fader with a metal cap), "hfader" (horizontal,
+    // smaller cap) or the default thin blue range control the web uses for gain and pan.
+    static void setStyle (juce::Slider& s, const char* style) { s.getProperties().set ("style", style); }
+    int getSliderThumbRadius (juce::Slider&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float min, float max,
+                           juce::Slider::SliderStyle, juce::Slider&) override;
+    void drawTickBox (juce::Graphics&, juce::Component&, float x, float y, float w, float h,
+                      bool ticked, bool enabled, bool over, bool down) override;
 };

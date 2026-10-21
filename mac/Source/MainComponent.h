@@ -3,6 +3,7 @@
 #include "AudioEngine.h"
 #include "TrackArea.h"
 #include "Look.h"
+#include "Console.h"
 
 // The main window, laid out like the web version's Studio view: top bar with modes and
 // transport, a setup bar (device, save folder), a toolbar, then the tracks and timeline.
@@ -36,6 +37,9 @@ private:
     void stopRecording();
     void setStatus (const juce::String&, bool error = false);
     void refreshLabels();
+    void setMode (bool live);
+    void saveLive();
+    juce::StringArray trackNames() const;
     int nextTakeNumber() const;
 
     juce::PropertiesFile& settings;
@@ -59,6 +63,9 @@ private:
     juce::OwnedArray<TrackRow> rows;
     TrackArea trackArea { rows };
     juce::Viewport viewport;
+    ConsoleView console { engine };
+    MasterStrip master { engine };
+    bool liveMode = false;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };
 

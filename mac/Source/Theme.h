@@ -14,6 +14,8 @@ namespace theme
     const juce::Colour accentText { 0xff0b1220 }; // text on accent buttons
     const juce::Colour record { 0xffff4757 };     // --rec
     const juce::Colour ok { 0xff2ed573 };         // --ok
+    const juce::Colour solo { 0xfff5c542 };       // --solo
+    const juce::Colour mute { 0xffff9f43 };       // --mute
     const juce::Colour clockBack { 0xff0c0d10 };
     const juce::Colour meterBack { 0xff16181d };
     const juce::Colour meterTick { 0xd90c0d10 };
