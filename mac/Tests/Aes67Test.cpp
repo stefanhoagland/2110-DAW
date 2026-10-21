@@ -135,6 +135,30 @@ int main()
     }
     else std::cout << "skip multicast: " << err << "\n";
 
+    // Packets held back in a bunch (as Wi-Fi does) cause a dropout; the buffer then grows.
+    {
+        net.resetStats();
+        const int before = net.status()[0].dropouts;
+        AudioBuffer<float> o (8, 48);
+        const auto start = Time::getMillisecondCounterHiRes();
+        for (int i = 0; i < 600; ++i)
+        {
+            const bool held = i >= 200 && i < 260; // 60 ms of packets arrive late, all at once
+            if (! held) tx.send (48, dc);
+            if (i == 260) for (int k = 0; k < 60; ++k) tx.send (48, dc);
+            while (Time::getMillisecondCounterHiRes() - start < i + 1.0) Thread::yield();
+            net.pull (o.getArrayOfWritePointers(), 8, 48, 48000.0);
+        }
+        auto st2 = net.status()[0];
+        check (st2.dropouts > before, "a 60 ms gap causes a dropout");
+        check (st2.bufferMs > 5.0, "the buffer grows after a dropout (" + String (st2.bufferMs) + " ms)");
+        check (st2.maxGapMs > 50.0, "longest gap measured (" + String (st2.maxGapMs, 1) + " ms)");
+        const auto rep = net.report();
+        check (rep.contains ("Test Box") && rep.contains ("longest gap between packets") && rep.contains ("dropouts"),
+               "report lists the stream and its timing");
+        std::cout << rep;
+    }
+
     net.unsubscribe (net.status()[0].info.key());
     check (net.numChannels() == 0, "unsubscribe removes the channels");
 

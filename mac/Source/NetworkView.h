@@ -33,7 +33,7 @@ private:
     juce::Component list;
     juce::Viewport viewport;
     juce::TextEditor sdpText;
-    juce::TextButton addButton { "Add stream" }, loadButton { "Load SDP file..." };
+    juce::TextButton addButton { "Add stream" }, loadButton { "Load SDP file..." }, reportButton { "Copy report" };
     std::unique_ptr<juce::FileChooser> chooser;
     std::vector<aes67::Interface> interfaces;
 };
