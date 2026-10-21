@@ -39,7 +39,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     addAndMakeVisible (clock);
 
     // Mode tabs. Only the recorder (Studio) exists in the Mac app so far.
-    for (auto* t : { &liveTab, &studioTab, &soundcheckTab })
+    for (auto* t : { &liveTab, &studioTab, &soundcheckTab, &patchTab })
     {
         WebLook::setStyle (*t, "mode");
         addAndMakeVisible (*t);
@@ -47,8 +47,15 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     studioTab.setToggleState (true, dontSendNotification);
     soundcheckTab.setEnabled (false);
     soundcheckTab.setTooltip ("Coming in a later step");
-    liveTab.onClick = [this] { setMode (true); };
-    studioTab.onClick = [this] { setMode (false); };
+    liveTab.onClick = [this] { setMode (liveMode); };
+    studioTab.onClick = [this] { setMode (studioMode); };
+    patchTab.onClick = [this] { setMode (patchMode); };
+    patchTab.setTooltip ("Patch interface inputs to tracks, and sources to interface outputs");
+
+    addChildComponent (patchView);
+    patchView.onChange = [this] { savePatch(); console.refresh(); console.setNames (trackNames()); };
+    PatchView::loadInputs (engine, settings.getValue ("patchIn"));
+    PatchView::loadOutputs (engine, settings.getValue ("patchOut"));
 
     addChildComponent (console);
     console.onChange = [this] { saveLive(); };
@@ -111,7 +118,8 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     master.refreshFromEngine();
     console.refresh();
     refreshLabels();
-    setMode (settings.getValue ("mode") == "live");
+    const auto savedMode = settings.getValue ("mode");
+    setMode (savedMode == "live" ? liveMode : savedMode == "patch" ? patchMode : studioMode);
 
     setWantsKeyboardFocus (true);
     setSize (1360, 820);
@@ -137,7 +145,7 @@ void MainComponent::paint (Graphics& g)
     g.fillRect (topBar);
     g.fillRect (setupBar);
     g.setColour (theme::line);
-    for (auto r : { topBar, setupBar, liveMode ? Rectangle<int>() : toolBar })
+    for (auto r : { topBar, setupBar, mode != studioMode ? Rectangle<int>() : toolBar })
         g.fillRect (r.getX(), r.getBottom() - 1, r.getWidth(), 1);
     if (notice.isVisible())
     {
@@ -179,10 +187,10 @@ void MainComponent::resized()
         const int brandW = GlyphArrangement::getStringWidthInt (FontOptions (18.0f, Font::bold), "Soundbending Live");
         b.removeFromLeft (brandW + 24 + (logo != nullptr ? 44 : 0));
         int pillW = 6 + 4 * 2;
-        for (auto* t : { &liveTab, &studioTab, &soundcheckTab }) pillW += widthOf (*t) + 8;
+        for (auto* t : { &liveTab, &studioTab, &soundcheckTab, &patchTab }) pillW += widthOf (*t) + 8;
         modesPill = b.removeFromLeft (pillW).withSizeKeepingCentre (pillW, 34);
         auto p = modesPill.reduced (3);
-        for (auto* t : { &liveTab, &studioTab, &soundcheckTab })
+        for (auto* t : { &liveTab, &studioTab, &soundcheckTab, &patchTab })
         {
             t->setBounds (p.removeFromLeft (widthOf (*t) + 8));
             p.removeFromLeft (4);
@@ -224,11 +232,8 @@ void MainComponent::resized()
     noticeBar = notice.isVisible() ? r.removeFromTop (34) : Rectangle<int>();
     notice.setBounds (noticeBar.reduced (12, 0));
 
-    if (liveMode)
-    {
-        console.setBounds (r);
-        return;
-    }
+    if (mode == liveMode) { console.setBounds (r); return; }
+    if (mode == patchMode) { patchView.setBounds (r); return; }
 
     // Toolbar: names and arming, take info, zoom.
     toolBar = r.removeFromTop (46);
@@ -290,20 +295,29 @@ StringArray MainComponent::trackNames() const
     return list;
 }
 
-void MainComponent::setMode (bool live)
+void MainComponent::setMode (Mode m)
 {
-    liveMode = live;
-    liveTab.setToggleState (live, dontSendNotification);
-    studioTab.setToggleState (! live, dontSendNotification);
+    mode = m;
+    liveTab.setToggleState (m == liveMode, dontSendNotification);
+    studioTab.setToggleState (m == studioMode, dontSendNotification);
+    patchTab.setToggleState (m == patchMode, dontSendNotification);
     for (Component* c : { (Component*) &armAll, (Component*) &disarmAll, (Component*) &importButton,
                           (Component*) &exportButton, (Component*) &takeInfo, (Component*) &zoomIn,
                           (Component*) &zoomOut, (Component*) &zoomLabel, (Component*) &viewport })
-        c->setVisible (! live);
-    console.setVisible (live);
-    if (live) console.setNames (trackNames());
-    settings.setValue ("mode", live ? "live" : "studio");
+        c->setVisible (m == studioMode);
+    console.setVisible (m == liveMode);
+    patchView.setVisible (m == patchMode);
+    if (m == liveMode) { console.setNames (trackNames()); console.refresh(); }
+    if (m == patchMode) patchView.refresh();
+    settings.setValue ("mode", m == liveMode ? "live" : m == patchMode ? "patch" : "studio");
     resized();
     repaint();
+}
+
+void MainComponent::savePatch()
+{
+    settings.setValue ("patchIn", PatchView::saveInputs (engine));
+    settings.setValue ("patchOut", PatchView::saveOutputs (engine));
 }
 
 void MainComponent::saveLive()
@@ -341,6 +355,7 @@ void MainComponent::changeListenerCallback (ChangeBroadcaster*)
     rebuildTracks();
     console.setNames (trackNames());
     console.refresh();
+    patchView.refresh();
     refreshLabels();
 }
 
@@ -509,7 +524,7 @@ void MainComponent::timerCallback()
     }
     trackArea.setTake (take, secs, rec);
     master.tick();
-    if (liveMode) console.tick();
+    if (mode == liveMode) console.tick();
 
     const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
     const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;

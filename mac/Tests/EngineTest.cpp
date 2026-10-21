@@ -8,8 +8,8 @@ using namespace juce;
 // A stand-in audio interface: 64 inputs at 48 kHz, driven by hand.
 struct FakeDevice : AudioIODevice
 {
-    FakeDevice() : AudioIODevice ("Fake 64", "test") { active.setRange (0, 64, true); }
-    StringArray getOutputChannelNames() override { return {}; }
+    FakeDevice() : AudioIODevice ("Fake 64", "test") { active.setRange (0, 64, true); activeOut.setRange (0, 8, true); }
+    StringArray getOutputChannelNames() override { StringArray s; for (int i = 0; i < 8; ++i) s.add ("Out " + String (i + 1)); return s; }
     StringArray getInputChannelNames() override { StringArray s; for (int i = 0; i < 64; ++i) s.add ("In " + String (i + 1)); return s; }
     Array<double> getAvailableSampleRates() override { return { 48000.0 }; }
     Array<int> getAvailableBufferSizes() override { return { 256 }; }
@@ -24,11 +24,11 @@ struct FakeDevice : AudioIODevice
     int getCurrentBufferSizeSamples() override { return 256; }
     double getCurrentSampleRate() override { return 48000.0; }
     int getCurrentBitDepth() override { return 24; }
-    BigInteger getActiveOutputChannels() const override { return {}; }
+    BigInteger getActiveOutputChannels() const override { return activeOut; }
     BigInteger getActiveInputChannels() const override { return active; }
     int getOutputLatencyInSamples() override { return 0; }
     int getInputLatencyInSamples() override { return 0; }
-    BigInteger active;
+    BigInteger active, activeOut;
 };
 
 static int failures = 0;
@@ -91,7 +91,7 @@ int main()
     }
 
     // ---- Live mix ----
-    AudioBuffer<float> out (2, block);
+    AudioBuffer<float> out (8, block);
     auto run = [&] (int count)
     {
         for (int b = 0; b < count; ++b)
@@ -101,7 +101,7 @@ int main()
                 in.setSample (0, i, 0.5f * std::sin ((float) pos * 0.05f));
                 in.setSample (63, i, 0.0f);
             }
-            engine.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), 64, out.getArrayOfWritePointers(), 2, block, ctx);
+            engine.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), 64, out.getArrayOfWritePointers(), 8, block, ctx);
         }
         return std::pair<float, float> { out.getMagnitude (0, 0, block), out.getMagnitude (1, 0, block) };
     };
@@ -143,6 +143,32 @@ int main()
     engine.setLive (false);
     auto [l8, r8] = run (2);
     check (l8 == 0.0f, "silent after leaving live");
+
+    // ---- Patching ----
+    engine.setLimiter (true);
+    engine.strip (0).trimDb = 0.0f;
+    engine.strip (0).faderDb = 0.0f;
+    engine.strip (0).pan = 0.0f;
+    engine.strip (2).faderDb = 0.0f;
+    engine.setTrackSource (0, -1);    // track 1 unpatched
+    engine.setTrackSource (2, 0);     // input 1 now feeds track 3
+    run (1);
+    engine.takePeak (0); engine.takePeak (2); // forget peaks from before the change
+    run (2);
+    check (engine.takePeak (0) == 0.0f && engine.takePeak (2) > 0.49f, "input patch moves input 1 to track 3");
+    engine.setLive (true);
+    engine.setPatch (AudioEngine::mixLeft, 0, false);
+    engine.setPatch (AudioEngine::mixLeft, 4, true);  // mix L to output 5
+    engine.setPatch (AudioEngine::firstDirect + 2, 7, true); // track 3 direct to output 8
+    run (4);
+    check (out.getMagnitude (0, 0, block) == 0.0f && out.getMagnitude (4, 0, block) > 0.3f, "mix L patched to output 5 (" + String (out.getMagnitude (0, 0, block)) + ", " + String (out.getMagnitude (4, 0, block)) + ")");
+    check (std::abs (out.getMagnitude (7, 0, block) - 0.5f) < 0.01f, "track direct out to output 8");
+    engine.setLive (false);
+    run (2);
+    check (out.getMagnitude (4, 0, block) == 0.0f && out.getMagnitude (7, 0, block) > 0.49f, "direct out keeps going when not live");
+    engine.resetPatches();
+    run (2);
+    check (engine.takePeak (0) > 0.49f && engine.getPatch (AudioEngine::mixLeft, 0) && ! engine.getPatch (AudioEngine::mixLeft, 4), "reset to 1:1");
 
     dir.deleteRecursively();
     std::cout << (failures ? "FAILED\n" : "ALL PASSED\n");
