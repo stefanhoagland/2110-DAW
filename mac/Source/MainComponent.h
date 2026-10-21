@@ -50,6 +50,7 @@ private:
     juce::File folder;
     int take = 0;
     double lastTakeSeconds = 0.0;
+    int ticks = 0;
 
     WebLook look;
     std::unique_ptr<juce::Drawable> logo;
@@ -66,7 +67,8 @@ private:
     juce::OwnedArray<TrackRow> rows;
     TrackArea trackArea { rows };
     juce::Viewport viewport;
-    ConsoleView console { engine };
+    PluginHost plugins { engine, settings };
+    ConsoleView console { engine, plugins };
     MasterStrip master { engine };
     PatchView patchView { engine, [this] (int t) { return t < rows.size() ? rows[t]->getName() : juce::String(); } };
     Mode mode = studioMode;

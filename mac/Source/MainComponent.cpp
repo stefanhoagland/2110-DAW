@@ -115,6 +115,8 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     engine.devices().addChangeListener (this);
     rebuildTracks();
     console.loadState (settings.getValue ("live"));
+    plugins.onInsertsChanged = [this] (int t) { console.refreshInserts (t); };
+    plugins.loadInserts (settings.getValue ("inserts"));
     master.refreshFromEngine();
     console.refresh();
     refreshLabels();
@@ -133,6 +135,7 @@ MainComponent::~MainComponent()
     engine.stopRecording();
     saveTracks();
     saveLive();
+    plugins.save();
     LookAndFeel::setDefaultLookAndFeel (nullptr);
 }
 
@@ -525,6 +528,8 @@ void MainComponent::timerCallback()
     trackArea.setTake (take, secs, rec);
     master.tick();
     if (mode == liveMode) console.tick();
+    // Plugins change their own settings in their windows; save them now and then.
+    if (++ticks % 300 == 0) plugins.save();
 
     const int ms = (int) std::fmod (secs * 1000.0, 1000.0);
     const int h = (int) secs / 3600, m = ((int) secs / 60) % 60, s = (int) secs % 60;

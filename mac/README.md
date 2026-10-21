@@ -15,7 +15,9 @@ no 32-channel cap, low latency, and (coming next) VST3/AU plugins.
 
 - **Patch** tab: XY crosspoint grids. *Inputs to tracks* picks which interface input feeds each track (Studio records and Live mixes the tracks). *Outputs* sends the live mix L/R or any track's direct input to any interface outputs. Click a cell to connect, drag across cells to do several, **Reset to 1:1** for the default. The patch applies to every tab and is remembered.
 
-Coming next: VST3/AU plugins on the strips, playback and Soundcheck (its track playback will appear as sources in the Outputs grid).
+- **Plugins**: VST3 and Audio Unit effects on each Live strip, between gain and pan (up to 8 per channel). Click **Plugins...** in the Live bar, then **Options > Scan for new or updated VST3/AudioUnit plug-ins** the first time. **+ Plugin** adds one; click it to open its window, right-click to bypass, move or remove it (Alt-click also toggles bypass). Plugins run in mono when they support it, otherwise in stereo with the two sides averaged back to the channel. Every plugin and its settings are saved and come back next launch.
+
+Coming next: playback and Soundcheck (its track playback will appear as sources in the Outputs grid).
 
 ## Download
 

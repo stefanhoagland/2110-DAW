@@ -33,11 +33,14 @@ target_sources(DAW2110 PRIVATE
   Source/Look.cpp
   Source/Console.cpp
   Source/Patch.cpp
+  Source/Plugins.cpp
   Source/Names.cpp)
 
 target_compile_definitions(DAW2110 PRIVATE
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
+  JUCE_PLUGINHOST_VST3=1
+  JUCE_PLUGINHOST_AU=$<IF:$<PLATFORM_ID:Darwin>,1,0>
   JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_PRODUCT_NAME>"
   JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_VERSION>")
 
@@ -59,6 +62,6 @@ target_link_libraries(NamesTest PRIVATE juce::juce_core juce::juce_recommended_c
 target_compile_definitions(NamesTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0)
 
 add_executable(EngineTest Source/AudioEngine.cpp Source/Names.cpp Tests/EngineTest.cpp)
-target_link_libraries(EngineTest PRIVATE juce::juce_audio_devices juce::juce_audio_formats juce::juce_events
+target_link_libraries(EngineTest PRIVATE juce::juce_audio_devices juce::juce_audio_formats juce::juce_audio_processors juce::juce_events
   juce::juce_recommended_config_flags)
 target_compile_definitions(EngineTest PRIVATE JUCE_STANDALONE_APPLICATION=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)

@@ -120,6 +120,14 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
 
     const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
     work.setSize (1, block, false, true, false);
+    fx.setSize (8, block, false, true, false);
+    midi.ensureSize (2048);
+    lastTrim.fill (1.0f);
+    for (int t = 0; t < maxChannels; ++t)
+    {
+        const SpinLock::ScopedLockType lock (insertLocks[(size_t) t]);
+        for (auto& ins : inserts[(size_t) t]) prepare (*ins);
+    }
     bus.setSize (2, block, false, true, false);
     lastL.fill (0.0f);
     lastR.fill (0.0f);
@@ -233,22 +241,25 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         const auto ch = (size_t) t;
         auto& st = strips[ch];
         const bool audible = ! st.mute.load (std::memory_order_relaxed) && (! anySolo || st.solo.load (std::memory_order_relaxed));
-        const float gain = audible ? Decibels::decibelsToGain (st.trimDb.load (std::memory_order_relaxed))
-                                       * faderGain (st.faderDb.load (std::memory_order_relaxed))
-                                   : 0.0f;
+
+        // Trim, then the plugin inserts.
+        const float trim = Decibels::decibelsToGain (st.trimDb.load (std::memory_order_relaxed));
+        FloatVectorOperations::copy (w, in, numSamples);
+        work.applyGainRamp (0, 0, numSamples, lastTrim[ch], trim);
+        lastTrim[ch] = trim;
+        runInserts (t, w, numSamples);
+
+        const float gain = audible ? faderGain (st.faderDb.load (std::memory_order_relaxed)) : 0.0f;
         // Constant-power pan, the same law as the web's StereoPannerNode for a mono source.
         const float x = (jlimit (-1.0f, 1.0f, st.pan.load (std::memory_order_relaxed)) + 1.0f) * 0.5f;
         const float gl = gain * std::cos (x * MathConstants<float>::halfPi);
         const float gr = gain * std::sin (x * MathConstants<float>::halfPi);
 
         // Post-fader meter (before pan), like the web strip meter.
-        const float post = gain * FloatVectorOperations::findMaximum (in, numSamples) ;
-        const float postNeg = -gain * FloatVectorOperations::findMinimum (in, numSamples);
-        storeMax (stripPeaks[ch], jmax (post, postNeg));
+        storeMax (stripPeaks[ch], gain * work.getMagnitude (0, 0, numSamples));
 
         if (gl > 0.0f || gr > 0.0f || lastL[ch] > 0.0f || lastR[ch] > 0.0f)
         {
-            FloatVectorOperations::copy (w, in, numSamples);
             bus.addFromWithRamp (0, 0, w, numSamples, lastL[ch], gl);
             bus.addFromWithRamp (1, 0, w, numSamples, lastR[ch], gr);
         }
@@ -392,4 +403,96 @@ double AudioEngine::recordedSeconds() const
 {
     const double rate = sampleRate();
     return rate > 0.0 ? (double) samplesRecorded.load() / rate : 0.0;
+}
+
+//==============================================================================
+void AudioEngine::prepare (Insert& ins) const
+{
+    auto& p = *ins.plugin;
+    const double rate = currentRate.load() > 0.0 ? currentRate.load() : 48000.0;
+    const int block = jmax (work.getNumSamples(), 512);
+    // Mono if the plugin can do it, otherwise stereo.
+    ins.channels = 2;
+    if (p.setBusesLayout ({ { AudioChannelSet::mono() }, { AudioChannelSet::mono() } }))
+        ins.channels = 1;
+    else
+        p.setBusesLayout ({ { AudioChannelSet::stereo() }, { AudioChannelSet::stereo() } });
+    p.setRateAndBufferSizeDetails (rate, block);
+    p.setNonRealtime (false);
+    p.prepareToPlay (rate, block);
+}
+
+void AudioEngine::runInserts (int track, float* samples, int numSamples)
+{
+    const SpinLock::ScopedTryLockType lock (insertLocks[(size_t) track]);
+    if (! lock.isLocked()) return; // the chain is being changed this instant; pass the audio through dry
+    for (auto& ins : inserts[(size_t) track])
+    {
+        if (ins->bypass.load (std::memory_order_relaxed)) continue;
+        auto& p = *ins->plugin;
+        const int chans = jmax (ins->channels, p.getTotalNumInputChannels(), p.getTotalNumOutputChannels());
+        if (chans > fx.getNumChannels() || numSamples > fx.getNumSamples()) continue;
+        for (int c = 0; c < chans; ++c)
+            FloatVectorOperations::copy (fx.getWritePointer (c), samples, numSamples);
+        AudioBuffer<float> view (fx.getArrayOfWritePointers(), chans, numSamples);
+        midi.clear();
+        p.processBlock (view, midi);
+        if (ins->channels == 1 || p.getTotalNumOutputChannels() < 2)
+            FloatVectorOperations::copy (samples, fx.getReadPointer (0), numSamples);
+        else
+        {
+            FloatVectorOperations::copyWithMultiply (samples, fx.getReadPointer (0), 0.5f, numSamples);
+            FloatVectorOperations::addWithMultiply (samples, fx.getReadPointer (1), 0.5f, numSamples);
+        }
+    }
+}
+
+bool AudioEngine::addInsert (int track, std::unique_ptr<AudioPluginInstance> plugin, const PluginDescription& d, bool bypass)
+{
+    if (! isPositiveAndBelow (track, maxChannels) || plugin == nullptr) return false;
+    auto next = getInserts (track);
+    if ((int) next.size() >= maxInserts) return false;
+    auto ins = std::make_shared<Insert>();
+    ins->plugin = std::move (plugin);
+    ins->description = d;
+    ins->bypass = bypass;
+    prepare (*ins);
+    next.push_back (ins);
+    {
+        const SpinLock::ScopedLockType lock (insertLocks[(size_t) track]);
+        inserts[(size_t) track].swap (next);
+    }
+    return true; // `next` (the old list) is released here, outside the lock
+}
+
+void AudioEngine::removeInsert (int track, int index)
+{
+    if (! isPositiveAndBelow (track, maxChannels)) return;
+    auto next = getInserts (track);
+    if (! isPositiveAndBelow (index, (int) next.size())) return;
+    next.erase (next.begin() + index);
+    {
+        const SpinLock::ScopedLockType lock (insertLocks[(size_t) track]);
+        inserts[(size_t) track].swap (next);
+    }
+    // The removed plugin is deleted when `next` goes out of scope, off the audio thread.
+}
+
+void AudioEngine::moveInsert (int track, int from, int to)
+{
+    if (! isPositiveAndBelow (track, maxChannels)) return;
+    auto next = getInserts (track);
+    if (! isPositiveAndBelow (from, (int) next.size()) || ! isPositiveAndBelow (to, (int) next.size())) return;
+    auto item = next[(size_t) from];
+    next.erase (next.begin() + from);
+    next.insert (next.begin() + to, item);
+    const SpinLock::ScopedLockType lock (insertLocks[(size_t) track]);
+    inserts[(size_t) track].swap (next);
+}
+
+AudioEngine::InsertList AudioEngine::getInserts (int track) const
+{
+    if (! isPositiveAndBelow (track, maxChannels)) return {};
+    const SpinLock::ScopedLockType lock (insertLocks[(size_t) track]);
+    return inserts[(size_t) track];
 }
