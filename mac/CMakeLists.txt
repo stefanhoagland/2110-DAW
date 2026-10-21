@@ -20,6 +20,7 @@ juce_add_gui_app(DAW2110
   COMPANY_NAME "2110"
   BUNDLE_ID "com.stefanhoagland.daw2110"
   VERSION ${PROJECT_VERSION}
+  ICON_BIG Resources/icon.png
   MICROPHONE_PERMISSION_ENABLED TRUE
   MICROPHONE_PERMISSION_TEXT "Soundbending Live records and mixes the inputs of your audio interface.")
 
@@ -38,7 +39,10 @@ target_compile_definitions(DAW2110 PRIVATE
   JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_PRODUCT_NAME>"
   JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:DAW2110,JUCE_VERSION>")
 
+juce_add_binary_data(DAW2110Assets SOURCES Resources/logo.svg)
+
 target_link_libraries(DAW2110 PRIVATE
+  DAW2110Assets
   juce::juce_audio_utils
   juce::juce_audio_devices
   juce::juce_audio_formats

@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "Names.h"
 #include "Theme.h"
+#include "BinaryData.h"
 
 using namespace juce;
 
@@ -18,6 +19,7 @@ static int widthOf (TextButton& b)
 MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 {
     LookAndFeel::setDefaultLookAndFeel (&look);
+    logo = Drawable::createFromImageData (BinaryData::logo_svg, BinaryData::logo_svgSize);
 
     for (auto* l : { &deviceInfo, &folderInfo, &takeInfo, &zoomLabel })
     {
@@ -132,7 +134,14 @@ void MainComponent::paint (Graphics& g)
     g.setFont (FontOptions (18.0f, Font::bold));
     const String first = "Soundbending ", second = "Live";
     const int w1 = GlyphArrangement::getStringWidthInt (g.getCurrentFont(), first);
-    auto brand = topBar.withTrimmedLeft (16);
+    auto brand = topBar.withTrimmedLeft (16).withTrimmedBottom (1);
+    if (logo != nullptr)
+    {
+        // The icon's artwork sits inside a 100 px margin of its 1024 px canvas; trim that off.
+        auto box = brand.removeFromLeft (34).withSizeKeepingCentre (34, 34).toFloat().expanded (34.0f * 100.0f / 824.0f);
+        logo->drawWithin (g, box, RectanglePlacement::centred, 1.0f);
+        brand.removeFromLeft (10);
+    }
     g.setColour (theme::text);
     g.drawText (first, brand, Justification::centredLeft);
     g.setColour (theme::accent);
@@ -153,7 +162,7 @@ void MainComponent::resized()
     {
         auto b = topBar.reduced (16, 10).withTrimmedBottom (1);
         const int brandW = GlyphArrangement::getStringWidthInt (FontOptions (18.0f, Font::bold), "Soundbending Live");
-        b.removeFromLeft (brandW + 24);
+        b.removeFromLeft (brandW + 24 + (logo != nullptr ? 44 : 0));
         int pillW = 6 + 4 * 2;
         for (auto* t : { &liveTab, &studioTab, &soundcheckTab }) pillW += widthOf (*t) + 8;
         modesPill = b.removeFromLeft (pillW).withSizeKeepingCentre (pillW, 34);
