@@ -169,7 +169,6 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
         b->setClickingTogglesState (true);
         b->setColour (TextButton::buttonOnColourId, theme::accent);
         b->setColour (TextButton::textColourOnId, theme::accentText);
-        b->setTooltip ("Send this channel to main " + String (m + 1));
         b->onClick = [this, m]
         {
             engine.strip (index).toMain[(size_t) m] = mains[m]->getToggleState();
@@ -177,6 +176,7 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
         };
         addAndMakeVisible (b);
     }
+    refreshBusNames();
     WebLook::setStyle (pre, "small");
     pre.setClickingTogglesState (true);
     pre.setColour (TextButton::buttonOnColourId, theme::solo);
@@ -234,9 +234,17 @@ void ChannelStrip::setSendsOnFader (int aux)
     pre.setVisible (sends);
     for (auto* c : { (Component*) &pan, (Component*) &panLabel, (Component*) &panValue })
         c->setVisible (! sends);
-    fader.setTooltip (sends ? "Send to Aux " + String (aux + 1) + ". Double-click for 0 dB." : String ("Fader. Double-click for 0 dB."));
+    refreshBusNames();
     refreshFromEngine();
     repaint();
+}
+
+void ChannelStrip::refreshBusNames()
+{
+    fader.setTooltip (sendsAux >= 0 ? "Send to " + engine.busFullName (false, sendsAux) + ". Double-click for 0 dB."
+                                    : String ("Fader. Double-click for 0 dB."));
+    for (int m = 0; m < mains.size(); ++m)
+        mains[m]->setTooltip ("Send this channel to " + engine.busFullName (true, m));
 }
 
 void ChannelStrip::push()
@@ -364,8 +372,18 @@ static void paintFaderScale (Graphics& g, const Slider& fader, Rectangle<int> sc
 
 BusStrip::BusStrip (AudioEngine& e, bool main, int i) : engine (e), isMain (main), index (i)
 {
-    smallLabel (name, (isMain ? "Main " : "Aux ") + String (i + 1), Justification::centredLeft, theme::text);
+    smallLabel (name, {}, Justification::centredLeft, theme::text);
     name.setFont (FontOptions (13.0f, Font::bold));
+    name.setInterceptsMouseClicks (true, false);
+    name.setEditable (false, true, false);
+    name.onEditorShow = [this] { if (auto* ed = name.getCurrentTextEditor()) ed->setText (engine.busLabel (isMain, index), false); };
+    name.onTextChange = [this]
+    {
+        engine.setBusLabel (isMain, index, name.getText());
+        refreshName();
+        if (onRenamed) onRenamed();
+    };
+    refreshName();
     smallLabel (dbValue, "0.0", Justification::centred, theme::text);
     dbValue.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 11.0f, Font::plain));
     addAndMakeVisible (name);
@@ -403,8 +421,15 @@ BusStrip::BusStrip (AudioEngine& e, bool main, int i) : engine (e), isMain (main
     refreshFromEngine();
 }
 
+void BusStrip::refreshName()
+{
+    name.setText (engine.busName (isMain, index), dontSendNotification);
+    name.setTooltip (engine.busFullName (isMain, index) + ". Double-click to label it.");
+}
+
 void BusStrip::refreshFromEngine()
 {
+    refreshName();
     fader.setValue (bus().faderDb.load(), dontSendNotification);
     mute.setToggleState (bus().mute.load(), dontSendNotification);
     dbValue.setText (fmtDb ((float) fader.getValue()), dontSendNotification);
@@ -449,7 +474,84 @@ void BusStrip::paint (Graphics& g)
 }
 
 //==============================================================================
-ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
+BusNamesView::BusNamesView (AudioEngine& e) : engine (e)
+{
+    for (auto* l : { &auxTitle, &mainTitle })
+    {
+        l->setFont (FontOptions (13.0f, Font::bold));
+        l->setColour (Label::textColourId, theme::text);
+        addAndMakeVisible (l);
+    }
+    auxTitle.setText ("Auxes", dontSendNotification);
+    mainTitle.setText ("Mains", dontSendNotification);
+    help.setText ("Type a name for any bus. It shows on the bus faders, the Faders menu and in Patch. Leave it empty for the plain number.",
+                  dontSendNotification);
+    help.setFont (FontOptions (13.0f));
+    help.setColour (Label::textColourId, theme::textMuted);
+    addAndMakeVisible (help);
+
+    for (int i = 0; i < AudioEngine::numAux + AudioEngine::numMains; ++i)
+    {
+        const bool main = i >= AudioEngine::numAux;
+        const int index = main ? i - AudioEngine::numAux : i;
+        auto* n = numbers.add (new Label());
+        n->setText ((main ? "Main " : "Aux ") + String (index + 1) + (main && index == 0 ? "  (master)" : ""), dontSendNotification);
+        n->setFont (FontOptions (13.0f));
+        n->setColour (Label::textColourId, theme::textMuted);
+        addAndMakeVisible (n);
+        auto* b = boxes.add (new TextEditor());
+        b->setFont (FontOptions (14.0f));
+        b->setTextToShowWhenEmpty ("No name", theme::textMuted.withAlpha (0.6f));
+        b->setIndents (8, 6);
+        b->setJustification (Justification::centredLeft);
+        b->onTextChange = [this, b, main, index]
+        {
+            engine.setBusLabel (main, index, b->getText());
+            if (onRenamed) onRenamed();
+        };
+        b->onReturnKey = [b] { b->giveAwayKeyboardFocus(); };
+        b->onEscapeKey = [b] { b->giveAwayKeyboardFocus(); };
+        addAndMakeVisible (b);
+    }
+    refresh();
+}
+
+void BusNamesView::refresh()
+{
+    for (int i = 0; i < boxes.size(); ++i)
+    {
+        const bool main = i >= AudioEngine::numAux;
+        const auto label = engine.busLabel (main, main ? i - AudioEngine::numAux : i);
+        if (boxes[i]->getText() != label) boxes[i]->setText (label, false);
+    }
+}
+
+void BusNamesView::resized()
+{
+    auto r = getLocalBounds().reduced (24, 16);
+    help.setBounds (r.removeFromTop (22));
+    r.removeFromTop (12);
+    const int colW = jmin (360, (r.getWidth() - 40) / 2), rowH = 34, numW = 110;
+    auto layout = [&] (Rectangle<int> col, Label& title, int from, int count)
+    {
+        title.setBounds (col.removeFromTop (24));
+        col.removeFromTop (6);
+        for (int i = from; i < from + count; ++i)
+        {
+            auto row = col.removeFromTop (rowH).withTrimmedBottom (4);
+            numbers[i]->setBounds (row.removeFromLeft (numW));
+            boxes[i]->setBounds (row);
+        }
+    };
+    layout (r.removeFromLeft (colW), auxTitle, 0, AudioEngine::numAux);
+    r.removeFromLeft (40);
+    layout (r.removeFromLeft (colW), mainTitle, AudioEngine::numAux, AudioEngine::numMains);
+}
+
+void BusNamesView::paint (Graphics& g) { g.fillAll (theme::background); }
+
+//==============================================================================
+ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h), busNames (e)
 {
     pluginsButton.setTooltip ("Find installed VST3 and Audio Unit plugins");
     pluginsButton.onClick = [this] { host.showScanner(); };
@@ -493,20 +595,26 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
     for (auto* b : buses)
     {
         b->onChange = [this] { if (onChange) onChange(); };
+        b->onRenamed = [this] { busNames.refresh(); refreshBusNames(); };
         busHolder.addAndMakeVisible (b);
     }
     busViewport.setViewedComponent (&busHolder, false);
     busViewport.setScrollBarsShown (false, true);
     addChildComponent (busViewport);
 
-    for (auto* t : { &channelsTab, &busesTab })
+    busNames.onRenamed = [this] { refreshBusNames(); };
+    addChildComponent (busNames);
+
+    for (auto* t : { &channelsTab, &busesTab, &namesTab })
     {
         WebLook::setStyle (*t, "mode");
         addAndMakeVisible (*t);
     }
     channelsTab.setToggleState (true, dontSendNotification);
-    channelsTab.onClick = [this] { showBuses = false; channelsTab.setToggleState (true, dontSendNotification); busesTab.setToggleState (false, dontSendNotification); resized(); };
-    busesTab.onClick = [this] { showBuses = true; channelsTab.setToggleState (false, dontSendNotification); busesTab.setToggleState (true, dontSendNotification); resized(); };
+    channelsTab.onClick = [this] { showView (0); };
+    busesTab.onClick = [this] { showView (1); };
+    namesTab.onClick = [this] { showView (2); };
+    namesTab.setTooltip ("Label the auxes and mains");
     busesTab.setTooltip ("The 12 aux and 8 main bus masters. Patch them to outputs in Patch > Outputs.");
 
     faderLabel.setText ("Faders:", dontSendNotification);
@@ -516,6 +624,7 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
     faderMode.addItem ("Main mix", 1);
     for (int a = 0; a < AudioEngine::numAux; ++a) faderMode.addItem ("Aux " + String (a + 1) + " sends", a + 2);
     faderMode.setSelectedId (1, dontSendNotification);
+    refreshBusNames();
     faderMode.setTooltip ("Choose an aux to set every channel's send to it with the channel faders (like sends on fader on a console).");
     faderMode.onChange = [this] { for (auto* st : strips) st->setSendsOnFader (faderMode.getSelectedId() - 2); };
     addAndMakeVisible (faderMode);
@@ -582,8 +691,28 @@ void ConsoleView::refreshInserts (int track)
 
 void ConsoleView::tick()
 {
-    if (showBuses) for (auto* b : buses) b->tick();
-    else for (auto* s : strips) s->tick();
+    if (view == 1) for (auto* b : buses) b->tick();
+    else if (view == 0) for (auto* s : strips) s->tick();
+}
+
+void ConsoleView::showView (int v)
+{
+    view = v;
+    showBuses = v == 1;
+    channelsTab.setToggleState (v == 0, dontSendNotification);
+    busesTab.setToggleState (v == 1, dontSendNotification);
+    namesTab.setToggleState (v == 2, dontSendNotification);
+    resized();
+}
+
+void ConsoleView::refreshBusNames()
+{
+    for (auto* b : buses) b->refreshName();
+    for (int a = 0; a < AudioEngine::numAux; ++a)
+        faderMode.changeItemText (a + 2, engine.busFullName (false, a) + " sends");
+    if (faderMode.getSelectedId() > 1) faderMode.setText (faderMode.getItemText (faderMode.getSelectedItemIndex()), dontSendNotification);
+    for (auto* s : strips) s->refreshBusNames();
+    if (onChange) onChange();
 }
 
 void ConsoleView::refreshBuses()
@@ -598,19 +727,22 @@ void ConsoleView::resized()
     auto width = [] (const String& t, bool bold = false)
     { return GlyphArrangement::getStringWidthInt (FontOptions (13.0f, bold ? Font::bold : Font::plain), t); };
 
-    const int tabW = width ("Channels", true) + 24, busW = width ("Buses", true) + 24;
-    viewPill = bar.removeFromLeft (tabW + busW + 10).withSizeKeepingCentre (tabW + busW + 10, 30);
+    const int tabW = width ("Channels", true) + 24, busW = width ("Buses", true) + 24, namesW = width ("Bus names", true) + 24;
+    const int pillW = tabW + busW + namesW + 14;
+    viewPill = bar.removeFromLeft (pillW).withSizeKeepingCentre (pillW, 30);
     {
         auto p = viewPill.reduced (3);
         channelsTab.setBounds (p.removeFromLeft (tabW));
         p.removeFromLeft (4);
         busesTab.setBounds (p.removeFromLeft (busW));
+        p.removeFromLeft (4);
+        namesTab.setBounds (p.removeFromLeft (namesW));
     }
     bar.removeFromLeft (14);
     faderLabel.setBounds (bar.removeFromLeft (width ("Faders:") + 6));
     faderMode.setBounds (bar.removeFromLeft (150).reduced (0, 1));
-    faderMode.setVisible (! showBuses);
-    faderLabel.setVisible (! showBuses);
+    faderMode.setVisible (view == 0);
+    faderLabel.setVisible (view == 0);
     bar.removeFromLeft (14);
 
     output.setBounds (bar.removeFromLeft (jmin (bar.getWidth() / 2, width (output.getText()) + 10)));
@@ -623,8 +755,10 @@ void ConsoleView::resized()
     bar.removeFromRight (12);
     hint.setBounds (bar);
 
-    viewport.setVisible (! showBuses);
-    busViewport.setVisible (showBuses);
+    viewport.setVisible (view == 0);
+    busViewport.setVisible (view == 1);
+    busNames.setVisible (view == 2);
+    busNames.setBounds (r);
     busViewport.setBounds (r);
     {
         const int bh = jmax (300, busViewport.getMaximumVisibleHeight());
@@ -695,6 +829,11 @@ String ConsoleView::saveState() const
     root->setProperty ("master", engine.getMasterDb());
     root->setProperty ("aux", auxList);
     root->setProperty ("mainBuses", mainList);
+    Array<var> auxNames, mainNames;
+    for (int a = 0; a < AudioEngine::numAux; ++a) auxNames.add (engine.busLabel (false, a));
+    for (int m = 0; m < AudioEngine::numMains; ++m) mainNames.add (engine.busLabel (true, m));
+    root->setProperty ("auxNames", auxNames);
+    root->setProperty ("mainNames", mainNames);
     return JSON::toString (var (root), true);
 }
 
@@ -740,8 +879,16 @@ void ConsoleView::loadState (const String& json)
     if (v.hasProperty ("limiter")) engine.setLimiter ((bool) v["limiter"]);
     if (v.hasProperty ("master")) engine.setMasterDb (jlimit (-60.0f, 10.0f, (float) v["master"]));
     limiter.setToggleState (engine.limiterEnabled(), dontSendNotification);
+    auto* auxNames = v["auxNames"].getArray();
+    auto* mainNames = v["mainNames"].getArray();
+    for (int a = 0; a < AudioEngine::numAux; ++a)
+        engine.setBusLabel (false, a, auxNames != nullptr && a < auxNames->size() ? (*auxNames)[a].toString() : String());
+    for (int m = 0; m < AudioEngine::numMains; ++m)
+        engine.setBusLabel (true, m, mainNames != nullptr && m < mainNames->size() ? (*mainNames)[m].toString() : String());
+    busNames.refresh();
     for (auto* s : strips) s->refreshFromEngine();
     refreshBuses();
+    refreshBusNames();
 }
 
 //==============================================================================

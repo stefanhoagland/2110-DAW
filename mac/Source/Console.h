@@ -49,6 +49,7 @@ public:
     void refreshFromEngine();  // after loading saved settings
     void tick();               // meters, ~30 times a second
     int channel() const { return index; }
+    void refreshBusNames(); // tooltips name the buses
     // -1: the fader is the channel fader. 0-11: the fader sets this channel's send to that aux.
     void setSendsOnFader (int aux);
 
@@ -85,8 +86,9 @@ class BusStrip : public juce::Component
 public:
     BusStrip (AudioEngine& engine, bool isMain, int index);
     void refreshFromEngine();
+    void refreshName();
     void tick();
-    std::function<void()> onChange;
+    std::function<void()> onChange, onRenamed;
 
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -103,6 +105,24 @@ private:
     juce::Rectangle<int> scaleArea;
 };
 
+// The Bus names tab: a text box per aux and main to label it ("Wedges", "IEM Drums").
+class BusNamesView : public juce::Component
+{
+public:
+    explicit BusNamesView (AudioEngine& engine);
+    void refresh(); // from the engine, after loading
+    std::function<void()> onRenamed;
+
+    void resized() override;
+    void paint (juce::Graphics&) override;
+
+private:
+    AudioEngine& engine;
+    juce::OwnedArray<juce::Label> numbers;
+    juce::OwnedArray<juce::TextEditor> boxes; // auxes, then mains
+    juce::Label auxTitle, mainTitle, help;
+};
+
 // The Live tab: the bar with Go live, output, limiter and latency, then the strips.
 class ConsoleView : public juce::Component
 {
@@ -114,6 +134,7 @@ public:
     void setNames (const juce::StringArray& names);
     void refresh();  // output name, latency and button states
     void refreshBuses(); // after the master fader moved
+    void refreshBusNames(); // after a bus was labelled
     void tick();
 
     // Settings as JSON text (strips, limiter, master) and back.
@@ -133,9 +154,12 @@ private:
     juce::ToggleButton limiter { "Master limiter" };
     juce::Label status, output, latency, hint, faderLabel;
     juce::ComboBox faderMode; // what the channel faders control: main mix or an aux's sends
-    juce::TextButton channelsTab { "Channels" }, busesTab { "Buses" };
+    juce::TextButton channelsTab { "Channels" }, busesTab { "Buses" }, namesTab { "Bus names" };
+    void showView (int v); // 0 channels, 1 buses, 2 bus names
+    int view = 0;
     juce::Rectangle<int> viewPill;
     bool showBuses = false;
+    BusNamesView busNames;
     juce::OwnedArray<ChannelStrip> strips;
     juce::OwnedArray<BusStrip> buses;
     juce::Component stripHolder, busHolder;
