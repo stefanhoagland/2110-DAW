@@ -442,3 +442,12 @@ label.check { cursor: pointer; }
   font: 12px ui-monospace, Menlo, monospace;
 }
 .aes-foot { font-size: 12px; margin: 10px 0 0; }
+#aes-search {
+  width: min(280px, 100%);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+#aes-search:focus { outline: none; border-color: var(--accent); }
+.aes-count { color: var(--text); }

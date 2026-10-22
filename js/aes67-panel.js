@@ -1,7 +1,7 @@
 // The AES67 window: pick streams to receive and the tracks they land on.
 
 import { LATENCY_CHOICES } from './aes67.js';
-import { parseSdpText } from './aes67-sdp.js';
+import { parseSdpText, matchesSearch } from './aes67-sdp.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -59,6 +59,13 @@ export function bindNetworkPanel(net, { numTracks, audioInfo, deviceChannels }) 
     if (f) addSdp(await f.text());
   });
 
+  const search = $('aes-search');
+  search.addEventListener('input', () => render());
+  search.addEventListener('keydown', (e) => {
+    // Esc clears the search first, and only closes the window when it's empty.
+    if (e.key === 'Escape' && search.value) { e.preventDefault(); e.stopPropagation(); search.value = ''; render(); }
+  });
+
   net.addEventListener('change', () => { if (dlg.open) render(); });
 
   function render() {
@@ -91,16 +98,20 @@ export function bindNetworkPanel(net, { numTracks, audioInfo, deviceChannels }) 
     sel.disabled = !net.available;
     lat.value = net.latencyMs;
 
-    // Announced streams, plus streams added by hand that aren't announced.
-    const list = net.discovered.map((info) => ({ info, sdp: info.sdp }));
-    for (const s of net.subs) {
-      if (s.info && !list.some((x) => x.info.key === s.info.key)) list.push({ info: s.info, sdp: s.sdp });
+    // Streams being received first, then the rest of what's announced.
+    const all = [];
+    for (const s of net.subs) if (s.info) all.push({ info: s.info, sdp: s.sdp });
+    for (const info of net.discovered) {
+      if (!all.some((x) => x.info.key === info.key)) all.push({ info, sdp: info.sdp });
     }
+    const query = search.value.trim();
+    const list = all.filter((x) => matchesSearch(x.info, query));
+    $('aes-count').textContent = query ? `Streams on the network · ${list.length} of ${all.length}` : 'Streams on the network';
     const subsShape = net.subs.map((s) => `${s.info && s.info.key}@${s.start}`).join(',');
-    const newShape = `${list.map((x) => x.info.key + x.info.format + x.info.name).join(',')}|${subsShape}`;
+    const newShape = `${query}|${list.map((x) => x.info.key + x.info.format + x.info.name).join(',')}|${subsShape}`;
     if (newShape !== shape) {
       shape = newShape;
-      build(list);
+      build(list, all.length, query);
     }
     for (const [key, r] of rows) {
       const s = net.subscription(key);
@@ -109,14 +120,16 @@ export function bindNetworkPanel(net, { numTracks, audioInfo, deviceChannels }) 
     }
   }
 
-  function build(list) {
+  function build(list, total, query) {
     const box = $('aes-list');
     box.innerHTML = '';
     rows.clear();
     if (!list.length) {
       const e = document.createElement('div');
       e.className = 'aes-empty';
-      e.textContent = net.available
+      e.textContent = total
+        ? `No streams match “${query}”. Try part of the name, the address (239.69…) or the sender's IP. Esc clears the search.`
+        : net.available
         ? 'No streams announced yet. Senders announce every 30 seconds or so; or add one from its SDP below.'
         : 'No streams yet.';
       box.appendChild(e);

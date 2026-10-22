@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { parseSdp, parseSap, parseRtp, streamKey, formatStream } from '../server/aes67.mjs';
-import { parseSdpText } from '../js/aes67-sdp.js';
+import { parseSdpText, matchesSearch } from '../js/aes67-sdp.js';
 import { Aes67Service, startServer } from '../server/aes67-server.mjs';
 
 const SDP = [
@@ -38,6 +38,16 @@ test('SDP: refuses what it cannot play, with a reason', () => {
   assert.ok(l16.ok);
   assert.equal(l16.info.name, '239.1.1.1'); // no session name: show the address
   assert.equal(formatStream(l16.info), '2 ch · L16 · 44.1 kHz · 1 ms');
+});
+
+test('search: every word must match the name, address, sender or format', () => {
+  const s = parseSdpText(SDP).info;
+  assert.ok(matchesSearch(s, ''));
+  assert.ok(matchesSearch(s, 'stage'));
+  assert.ok(matchesSearch(s, 'BOX  239.69.1.11'));
+  assert.ok(matchesSearch(s, '192.168.1.20'));
+  assert.ok(matchesSearch(s, '8 ch'));
+  assert.ok(!matchesSearch(s, 'stage foh'));
 });
 
 const sapPacket = (sdp, { deleted = false, type = true } = {}) => Buffer.concat([

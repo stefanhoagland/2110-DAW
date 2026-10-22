@@ -66,6 +66,15 @@ try {
   await page.click('#btn-aes67');
   await page.waitForFunction(() => window.daw.net.discovered.length === 2, null, { timeout: 5000 });
   check(true, 'both announced streams listed');
+  await page.fill('#aes-search', 'foh');
+  const found = await page.locator('.aes-stream').allTextContents();
+  check(found.length === 1 && found[0].includes('FOH Console Mix'), 'search narrows the list');
+  await page.fill('#aes-search', 'nothing like this');
+  check((await page.textContent('#aes-list')).includes('No streams match'), 'search says when nothing matches');
+  await page.focus('#aes-search');
+  await page.keyboard.press('Escape');
+  check(await page.locator('.aes-stream').count() === 2 && await page.locator('#aes67-dialog').evaluate((d) => d.open),
+    'Esc clears the search and keeps the window open');
   await page.selectOption('#aes-iface', '127.0.0.1'); // the pretend sender is on the loopback port
 
   // Receive both; the 8-channel box on tracks 3-10, the console mix on 11-12.
