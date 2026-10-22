@@ -24,6 +24,7 @@ public:
     juce::String saveInserts() const; // every track's inserts with their settings (JSON)
     void loadInserts (const juce::String& json);
     void save();                      // writes saveInserts() to the settings
+    void clearAll();                  // removes every insert (before loading a show)
 
     std::function<void (int track)> onInsertsChanged;
 

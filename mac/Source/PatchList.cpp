@@ -379,6 +379,7 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
                     engine.setTrackSource (track, -1);
             }
 
+    touched.clear();
     int t = firstTrack, placed = 0;
     for (auto& id : sources)
     {
@@ -393,6 +394,7 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
         }
         if (input < 0 || input >= engine.numInputs()) continue;
         if (t >= engine.numInputs()) break;
+        touched.add (t);
         engine.setTrackSource (t++, input);
         ++placed;
     }
@@ -424,7 +426,8 @@ void PatchListView::unpatchSelected()
 {
     auto rows = tracks->getSelectedRows();
     if (rows.isEmpty()) return;
-    for (int i = 0; i < rows.size(); ++i) engine.setTrackSource (rows[i], -1);
+    touched.clear();
+    for (int i = 0; i < rows.size(); ++i) { engine.setTrackSource (rows[i], -1); touched.add (rows[i]); }
     if (onChange) onChange();
     refresh();
 }

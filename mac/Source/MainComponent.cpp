@@ -63,7 +63,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     patchTab.setTooltip ("Patch interface inputs to tracks, and sources to interface outputs");
 
     addChildComponent (patchView);
-    patchView.onChange = [this] { rememberPatch(); savePatch(); applyAutoNames(); console.refresh(); console.setNames (trackNames()); };
+    patchView.onChange = [this] { namesFollowPatch(); rememberPatch(); savePatch(); applyAutoNames(); console.refresh(); console.setNames (trackNames()); };
     patchView.setInputView (settings.getValue ("patchView") == "grid" ? 1 : 0);
     patchView.onViewChange = [this] { settings.setValue ("patchView", patchView.getInputView() == 1 ? "grid" : "list"); };
     patchIds.addLines (settings.getValue ("patchNet"));
@@ -101,6 +101,11 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     networkButton.setTooltip ("Receive AES67 / SMPTE ST 2110-30 audio streams from the network as extra inputs");
     networkButton.onClick = [this] { showNetwork(); };
     addAndMakeVisible (networkButton);
+    showButton.setTooltip ("Save or open a show: track names, patch, live mix, plugins and AES67 streams in one file (Cmd-S, Cmd-O)");
+    showButton.onClick = [this] { showShowMenu(); };
+    addAndMakeVisible (showButton);
+    showFile = File (settings.getValue ("showFile"));
+    refreshShowButton();
     for (auto* b : { &audioButton, &folderButton, &armAll, &disarmAll, &importButton, &exportButton, &zoomOut, &zoomIn })
         addAndMakeVisible (*b);
     importButton.setTooltip ("Load channel names from a CSV file (Channel, Name)");
@@ -145,6 +150,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     const auto savedMode = settings.getValue ("mode");
     setMode (savedMode == "live" ? liveMode : savedMode == "patch" ? patchMode : studioMode);
 
+    noteSources();
     setWantsKeyboardFocus (true);
     setSize (1360, 820);
     startTimerHz (30);
@@ -246,6 +252,8 @@ void MainComponent::resized()
     setupBar = r.removeFromTop (46);
     {
         auto b = setupBar.reduced (16, 8).withTrimmedBottom (1);
+        showButton.setBounds (b.removeFromLeft (jmin (widthOf (showButton), 220)));
+        b.removeFromLeft (10);
         audioButton.setBounds (b.removeFromLeft (widthOf (audioButton)));
         b.removeFromLeft (10);
         timecodeButton.setBounds (b.removeFromLeft (jmin (widthOf (timecodeButton), 240)));
@@ -376,6 +384,154 @@ void MainComponent::followNetworkPatch()
         if (patchIds[t].isNotEmpty()) engine.setTrackSource (t, PatchView::networkInput (engine, patchIds[t]));
     rememberPatch();
     savePatch();
+}
+
+void MainComponent::noteSources()
+{
+    lastSources.resize ((size_t) AudioEngine::maxChannels);
+    for (int t = 0; t < AudioEngine::maxChannels; ++t) lastSources[(size_t) t] = engine.getTrackSource (t);
+}
+
+void MainComponent::namesFollowPatch()
+{
+    // Patching or unpatching a track names it after its new source ("Ch N" when nothing),
+    // even if it had a typed name. Stream changes alone don't touch typed names.
+    auto touched = patchView.takeTouched();
+    for (int t = 0; t < (int) lastSources.size() && t < rows.size(); ++t)
+        if (engine.getTrackSource (t) != lastSources[(size_t) t]) touched.addIfNotAlreadyThere (t);
+    bool changed = false;
+    for (auto t : touched)
+        if (isPositiveAndBelow (t, rows.size()))
+        {
+            const auto n = autoName (t);
+            if (rows[t]->getName() != n) { rows[t]->setName (n); changed = true; }
+            lastAuto.set (t, n);
+        }
+    noteSources();
+    if (changed) saveTracks();
+}
+
+//==============================================================================
+static const char* const showKeys[] = { "names", "armed", "live", "inserts", "patchIn", "patchOut", "patchNet", "aes67", "timecode" };
+
+void MainComponent::refreshShowButton()
+{
+    showButton.setButtonText (showFile.existsAsFile() ? "Show: " + showFile.getFileNameWithoutExtension() : String ("Show: Untitled"));
+    resized();
+}
+
+void MainComponent::showShowMenu()
+{
+    PopupMenu m;
+    m.addItem (1, "Save show", true, false);
+    m.addItem (2, "Save show as...");
+    m.addItem (3, "Open show...");
+    if (showFile.existsAsFile())
+    {
+        m.addSeparator();
+        m.addItem (4, "Show in Finder");
+    }
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (showButton), [this] (int r)
+    {
+        if (r == 1) saveShow (false);
+        if (r == 2) saveShow (true);
+        if (r == 3) openShow();
+        if (r == 4) showFile.revealToUser();
+    });
+}
+
+String MainComponent::showToJson()
+{
+    // Bring the settings up to date first, then copy them into the show.
+    saveTracks();
+    savePatch();
+    saveLive();
+    plugins.save();
+    settings.setValue ("aes67", engine.network().saveState());
+    DynamicObject::Ptr o = new DynamicObject();
+    o->setProperty ("app", "Soundbending Live");
+    o->setProperty ("version", 1);
+    for (auto* k : showKeys) o->setProperty (k, settings.getValue (k));
+    return JSON::toString (var (o.get()));
+}
+
+void MainComponent::saveShow (bool askWhere)
+{
+    if (! askWhere && showFile.existsAsFile())
+    {
+        if (showFile.replaceWithText (showToJson())) setStatus ("Saved " + showFile.getFileName());
+        else setStatus ("Couldn't save " + showFile.getFullPathName(), true);
+        return;
+    }
+    auto start = showFile.existsAsFile() ? showFile : folder.getChildFile ("Untitled.slshow");
+    chooser = std::make_unique<FileChooser> ("Save show", start, "*.slshow");
+    chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles
+                              | FileBrowserComponent::warnAboutOverwriting,
+                          [this] (const FileChooser& fc)
+                          {
+                              auto f = fc.getResult();
+                              if (f == File()) return;
+                              f = f.withFileExtension ("slshow");
+                              if (! f.replaceWithText (showToJson())) { setStatus ("Couldn't save " + f.getFullPathName(), true); return; }
+                              showFile = f;
+                              settings.setValue ("showFile", f.getFullPathName());
+                              refreshShowButton();
+                              setStatus ("Saved " + f.getFileName());
+                          });
+}
+
+void MainComponent::openShow()
+{
+    if (engine.isRecording()) { setStatus ("Stop recording before opening a show.", true); return; }
+    chooser = std::make_unique<FileChooser> ("Open show", showFile.existsAsFile() ? showFile : folder, "*.slshow");
+    chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+                          [this] (const FileChooser& fc)
+                          {
+                              auto f = fc.getResult();
+                              if (f == File()) return;
+                              auto v = JSON::parse (f.loadFileAsString());
+                              if (! v.isObject() || ! v.hasProperty ("patchIn")) { setStatus (f.getFileName() + " isn't a show file.", true); return; }
+                              if (engine.isRecording()) return;
+                              applyShow (v);
+                              showFile = f;
+                              settings.setValue ("showFile", f.getFullPathName());
+                              refreshShowButton();
+                              setStatus ("Opened " + f.getFileName());
+                          });
+}
+
+void MainComponent::applyShow (const var& v)
+{
+    for (auto* k : showKeys) settings.setValue (k, v.getProperty (k, String()).toString());
+
+    // Start from a clean slate: no plugins, no streams, tracks 1:1.
+    plugins.clearAll();
+    auto& net = engine.network();
+    for (auto& s : net.status()) net.unsubscribe (s.info.key());
+    for (int t = 0; t < AudioEngine::maxChannels; ++t) engine.setTrackSource (t, t);
+
+    net.loadState (settings.getValue ("aes67"));
+    patchIds.clear();
+    patchIds.addLines (settings.getValue ("patchNet"));
+    PatchView::loadInputs (engine, settings.getValue ("patchIn"));
+    PatchView::loadOutputs (engine, settings.getValue ("patchOut"));
+    followNetworkPatch();
+    console.loadState (settings.getValue ("live"));
+    master.refreshFromEngine();
+    plugins.loadInserts (settings.getValue ("inserts"));
+    applyTimecode (settings.getValue ("timecode", "off"), false);
+
+    rows.clear(); // rebuild every track with the show's names and arming
+    lastAuto.clear();
+    rebuildTracks();
+    applyAutoNames();
+    console.setNames (trackNames());
+    console.refresh();
+    patchView.refresh();
+    if (networkWindow != nullptr)
+        if (auto* nv = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) nv->refresh();
+    refreshLabels();
+    noteSources();
 }
 
 void MainComponent::saveLive()
@@ -624,6 +780,9 @@ void MainComponent::updateUsage()
 bool MainComponent::keyPressed (const KeyPress& key)
 {
     if (key == KeyPress ('r') || key == KeyPress ('R')) { toggleRecord(); return true; }
+    if (key == KeyPress ('s', ModifierKeys::commandModifier, 0)) { saveShow (false); return true; }
+    if (key == KeyPress ('s', ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0)) { saveShow (true); return true; }
+    if (key == KeyPress ('o', ModifierKeys::commandModifier, 0)) { openShow(); return true; }
     if (key == KeyPress::escapeKey) { grabKeyboardFocus(); return true; }
     return false;
 }
@@ -766,6 +925,7 @@ void MainComponent::networkChanged()
     console.refresh();
     patchView.refresh();
     refreshLabels();
+    noteSources();
 }
 
 //==============================================================================
