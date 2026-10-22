@@ -108,6 +108,60 @@ void InsertItem::mouseUp (const MouseEvent& e)
     else host.openEditor (track, index);
 }
 
+SendKnob::SendKnob()
+{
+    setSliderStyle (Slider::RotaryVerticalDrag);
+    setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    setRange (-60.0, 10.0, 0.1);
+    setValue (-60.0, dontSendNotification);
+    setDoubleClickReturnValue (true, 0.0);
+    setMouseDragSensitivity (160);
+    setMouseCursor (MouseCursor::UpDownResizeCursor);
+}
+
+void SendKnob::mouseDown (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        preFader = ! preFader;
+        repaint();
+        if (onPreChanged) onPreChanged();
+        return;
+    }
+    Slider::mouseDown (e);
+}
+
+void SendKnob::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    const float size = jmin (r.getWidth(), r.getHeight()) - 3.0f;
+    auto k = r.withSizeKeepingCentre (size, size);
+    const float start = MathConstants<float>::pi * 1.25f, end = MathConstants<float>::pi * 2.75f;
+    const double v = getValue();
+    const bool on = v > -60.0;
+    const float pos = (float) ((v + 60.0) / 70.0);
+    const float rad = size * 0.5f - 2.0f;
+    Path track, value;
+    track.addCentredArc (k.getCentreX(), k.getCentreY(), rad, rad, 0.0f, start, end, true);
+    g.setColour (theme::textMuted.withAlpha (0.3f));
+    g.strokePath (track, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
+    if (on)
+    {
+        value.addCentredArc (k.getCentreX(), k.getCentreY(), rad, rad, 0.0f, start, start + pos * (end - start), true);
+        g.setColour (preFader ? theme::accent : theme::solo);
+        g.strokePath (value, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
+    }
+    g.setColour (on ? theme::text : theme::textMuted);
+    g.setFont (FontOptions (10.0f, Font::bold));
+    g.drawText (auxNumber, k, Justification::centred);
+    if (! preFader) // post-fader sends are the exception, so only they are marked
+    {
+        g.setColour (theme::solo);
+        g.setFont (FontOptions (8.0f, Font::bold));
+        g.drawText ("POST", k.withTrimmedTop (k.getHeight() * 0.62f).expanded (4.0f, 0.0f), Justification::centredTop);
+    }
+}
+
 ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e), host (h), index (ch)
 {
     smallLabel (number, String (ch + 1), Justification::bottomLeft, theme::textMuted);
@@ -177,6 +231,24 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
         addAndMakeVisible (b);
     }
     refreshBusNames();
+    for (int a = 0; a < AudioEngine::numAux; ++a)
+    {
+        auto* k = sends.add (new SendKnob());
+        k->auxNumber = String (a + 1);
+        k->onValueChange = [this, a, k]
+        {
+            engine.strip (index).sendDb[(size_t) a] = (float) k->getValue();
+            if (sendsAux == a) fader.setValue (k->getValue(), dontSendNotification), dbValue.setText (fmtDb ((float) k->getValue()), dontSendNotification);
+            if (onChange) onChange();
+        };
+        k->onPreChanged = [this, a, k]
+        {
+            engine.strip (index).sendPre[(size_t) a] = k->preFader;
+            if (sendsAux == a) pre.setToggleState (k->preFader, dontSendNotification);
+            if (onChange) onChange();
+        };
+        addChildComponent (k);
+    }
     WebLook::setStyle (pre, "small");
     pre.setClickingTogglesState (true);
     pre.setColour (TextButton::buttonOnColourId, theme::solo);
@@ -208,6 +280,7 @@ void ChannelStrip::refreshInserts()
         addAndMakeVisible (insertItems.add (new InsertItem (host, index, i, list[(size_t) i]->description.name,
                                                             list[(size_t) i]->bypass.load())));
     addPlugin.setVisible ((int) list.size() < AudioEngine::maxInserts);
+    if (showSends) setShowSends (true); // keep the plugins hidden behind the sends
     resized();
 }
 
@@ -265,6 +338,33 @@ void ChannelStrip::push()
 void ChannelStrip::tick()
 {
     meter.setLevel (engine.takeStripPeak (index));
+    if (showSends) refreshSends(); // follows sends on fader and loaded settings
+}
+
+void ChannelStrip::setShowSends (bool show)
+{
+    showSends = show;
+    for (auto* k : sends) k->setVisible (show);
+    for (auto* item : insertItems) item->setVisible (! show);
+    addPlugin.setVisible (! show && insertItems.size() < AudioEngine::maxInserts);
+    refreshSends();
+    resized();
+    repaint();
+}
+
+void ChannelStrip::refreshSends()
+{
+    auto& st = engine.strip (index);
+    for (int a = 0; a < sends.size(); ++a)
+    {
+        auto* k = sends[a];
+        if (! k->isMouseButtonDown()) k->setValue (st.sendDb[(size_t) a].load(), dontSendNotification);
+        const bool p = st.sendPre[(size_t) a].load();
+        if (p != k->preFader) { k->preFader = p; k->repaint(); }
+        k->auxNumber = String (a + 1);
+        k->setTooltip (engine.busFullName (false, a) + " send: " + fmtDb ((float) k->getValue()) + " dB, "
+                       + (p ? "pre" : "post") + " fader. Drag to set, double-click for 0 dB, right-click for pre/post.");
+    }
 }
 
 void ChannelStrip::resized()
@@ -287,6 +387,14 @@ void ChannelStrip::resized()
 
     // Inserts: one row per plugin, then "+ Plugin" (the web keeps 128 px for this).
     insertArea = r.removeFromTop (128);
+    if (showSends)
+    {
+        // 3 across, 4 down.
+        const int cw = insertArea.getWidth() / 3, ch = insertArea.getHeight() / 4;
+        for (int i = 0; i < sends.size(); ++i)
+            sends[i]->setBounds (insertArea.getX() + (i % 3) * cw, insertArea.getY() + (i / 3) * ch, cw, ch - 2);
+    }
+    else
     {
         auto a = insertArea;
         for (auto* item : insertItems)
@@ -628,6 +736,14 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h),
     faderMode.setTooltip ("Choose an aux to set every channel's send to it with the channel faders (like sends on fader on a console).");
     faderMode.onChange = [this] { for (auto* st : strips) st->setSendsOnFader (faderMode.getSelectedId() - 2); };
     addAndMakeVisible (faderMode);
+
+    // The other way to set sends: a knob per aux on every channel, in place of the plugins.
+    sendsButton.setClickingTogglesState (true);
+    sendsButton.setColour (TextButton::buttonOnColourId, theme::accent);
+    sendsButton.setColour (TextButton::textColourOnId, theme::accentText);
+    sendsButton.setTooltip ("Show a send knob for each of the 12 auxes on every channel (in place of the plugins)");
+    sendsButton.onClick = [this] { for (auto* st : strips) st->setShowSends (sendsButton.getToggleState()); if (onChange) onChange(); };
+    addAndMakeVisible (sendsButton);
     refresh();
 }
 
@@ -641,6 +757,7 @@ void ConsoleView::rebuild (int n, const StringArray& names)
             auto* s = strips.add (new ChannelStrip (engine, host, i));
             s->onChange = [this] { if (onChange) onChange(); };
             s->setSendsOnFader (faderMode.getSelectedId() - 2);
+            s->setShowSends (sendsButton.getToggleState());
             stripHolder.addAndMakeVisible (s);
         }
         resized();
@@ -743,6 +860,9 @@ void ConsoleView::resized()
     faderMode.setBounds (bar.removeFromLeft (150).reduced (0, 1));
     faderMode.setVisible (view == 0);
     faderLabel.setVisible (view == 0);
+    bar.removeFromLeft (10);
+    sendsButton.setBounds (bar.removeFromLeft (width ("Show sends") + 24).reduced (0, 1));
+    sendsButton.setVisible (view == 0);
     bar.removeFromLeft (14);
 
     output.setBounds (bar.removeFromLeft (jmin (bar.getWidth() / 2, width (output.getText()) + 10)));
@@ -833,6 +953,7 @@ String ConsoleView::saveState() const
     for (int a = 0; a < AudioEngine::numAux; ++a) auxNames.add (engine.busLabel (false, a));
     for (int m = 0; m < AudioEngine::numMains; ++m) mainNames.add (engine.busLabel (true, m));
     root->setProperty ("auxNames", auxNames);
+    root->setProperty ("showSends", sendsButton.getToggleState());
     root->setProperty ("mainNames", mainNames);
     return JSON::toString (var (root), true);
 }
@@ -886,6 +1007,8 @@ void ConsoleView::loadState (const String& json)
     for (int m = 0; m < AudioEngine::numMains; ++m)
         engine.setBusLabel (true, m, mainNames != nullptr && m < mainNames->size() ? (*mainNames)[m].toString() : String());
     busNames.refresh();
+    sendsButton.setToggleState ((bool) v.getProperty ("showSends", false), dontSendNotification);
+    for (auto* s : strips) s->setShowSends (sendsButton.getToggleState());
     for (auto* s : strips) s->refreshFromEngine();
     refreshBuses();
     refreshBusNames();

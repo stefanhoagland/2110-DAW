@@ -36,6 +36,19 @@ private:
     bool bypass;
 };
 
+// A small send knob: one aux's send level from one channel, its number in the middle.
+// Drag up and down; double-click for 0 dB; right-click switches pre/post fader.
+class SendKnob : public juce::Slider
+{
+public:
+    SendKnob();
+    bool preFader = true;
+    juce::String auxNumber;
+    std::function<void()> onPreChanged;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+};
+
 // One channel strip of the live console, like the web version's:
 // gain, plugin inserts, pan, fader with dB scale and meter, mute and solo.
 class ChannelStrip : public juce::Component
@@ -52,6 +65,8 @@ public:
     void refreshBusNames(); // tooltips name the buses
     // -1: the fader is the channel fader. 0-11: the fader sets this channel's send to that aux.
     void setSendsOnFader (int aux);
+    // Shows the 12 aux send knobs in place of the plugin inserts.
+    void setShowSends (bool show);
 
     std::function<void()> onChange;
 
@@ -76,6 +91,9 @@ private:
     juce::OwnedArray<juce::TextButton> mains; // assign to main 1-8
     juce::Label mainsLabel;
     int sendsAux = -1;
+    bool showSends = false;
+    juce::OwnedArray<SendKnob> sends;
+    void refreshSends();
     VMeter meter;
     juce::Rectangle<int> scaleArea;
 };
@@ -155,6 +173,7 @@ private:
     juce::Label status, output, latency, hint, faderLabel;
     juce::ComboBox faderMode; // what the channel faders control: main mix or an aux's sends
     juce::TextButton channelsTab { "Channels" }, busesTab { "Buses" }, namesTab { "Bus names" };
+    juce::TextButton sendsButton { "Show sends" };
     void showView (int v); // 0 channels, 1 buses, 2 bus names
     int view = 0;
     juce::Rectangle<int> viewPill;
