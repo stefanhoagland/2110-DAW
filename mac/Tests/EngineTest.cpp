@@ -215,6 +215,47 @@ int main()
     run (2);
     check (engine.takePeak (0) > 0.49f && engine.getPatch (AudioEngine::mixLeft, 0) && ! engine.getPatch (AudioEngine::mixLeft, 4), "reset to 1:1");
 
+    // ---- Aux and main buses ----
+    engine.setLive (true);
+    engine.strip (0).sendDb[2] = 0.0f;                    // channel 1 to aux 3, pre fader
+    engine.setPatch (AudioEngine::firstAux + 2, 2, true); // aux 3 to output 3
+    run (4);
+    check (std::abs (out.getMagnitude (2, 0, block) - 0.5f) < 0.01f, "aux 3 send reaches output 3 (" + String (out.getMagnitude (2, 0, block)) + ")");
+    check (engine.takeAuxPeak (2) > 0.49f && engine.takeAuxPeak (0) == 0.0f, "aux meters");
+    engine.strip (0).faderDb = -60.0f;
+    run (4);
+    check (out.getMagnitude (0, 0, block) == 0.0f && std::abs (out.getMagnitude (2, 0, block) - 0.5f) < 0.01f, "pre-fader send ignores the channel fader");
+    engine.strip (0).sendPre[2] = false;
+    run (4);
+    check (out.getMagnitude (2, 0, block) == 0.0f, "post-fader send follows the channel fader");
+    engine.strip (0).sendPre[2] = true;
+    engine.strip (0).faderDb = 0.0f;
+    engine.strip (5).solo = true;
+    run (4);
+    check (out.getMagnitude (0, 0, block) == 0.0f && out.getMagnitude (2, 0, block) > 0.49f, "solo cuts the mains but not the auxes");
+    engine.strip (5).solo = false;
+    engine.aux (2).mute = true;
+    run (4);
+    check (out.getMagnitude (2, 0, block) == 0.0f, "aux master mute");
+    engine.aux (2).mute = false;
+    engine.aux (2).faderDb = -6.0f;
+    run (4);
+    check (std::abs (out.getMagnitude (2, 0, block) - 0.5f * 0.5012f) < 0.01f, "aux master fader");
+    engine.aux (2).faderDb = 0.0f;
+
+    engine.strip (0).toMain[2] = true;  // channel 1 also to main 3
+    engine.strip (0).toMain[0] = false; // and off main 1
+    engine.setPatch (AudioEngine::mainSource (2, 0), 3, true); // main 3 L to output 4
+    run (4);
+    check (std::abs (out.getMagnitude (3, 0, block) - 0.5f * 0.7071f) < 0.01f, "main 3 reaches output 4 (" + String (out.getMagnitude (3, 0, block)) + ")");
+    check (out.getMagnitude (0, 0, block) == 0.0f, "unassigned from main 1");
+    check (engine.takeMainPeak (2, 0) > 0.3f, "main meters");
+    engine.strip (0).toMain[0] = true;
+    engine.strip (0).toMain[2] = false;
+    engine.strip (0).sendDb[2] = -60.0f;
+    engine.resetPatches();
+    run (2);
+
     // ---- Plugin inserts ----
     engine.strip (2).faderDb = -60.0f;
     engine.setLimiter (false); // measure the plugins, not the limiter's recovery from the earlier +30 dB test

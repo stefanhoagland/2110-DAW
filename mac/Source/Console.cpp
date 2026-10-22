@@ -160,6 +160,35 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
     solo.setColour (TextButton::buttonOnColourId, theme::solo);
     solo.setColour (TextButton::textColourOnId, Colour (0xff111111));
 
+    smallLabel (mainsLabel, "Mains", Justification::centredLeft, theme::textMuted);
+    addAndMakeVisible (mainsLabel);
+    for (int m = 0; m < AudioEngine::numMains; ++m)
+    {
+        auto* b = mains.add (new TextButton (String (m + 1)));
+        WebLook::setStyle (*b, "small");
+        b->setClickingTogglesState (true);
+        b->setColour (TextButton::buttonOnColourId, theme::accent);
+        b->setColour (TextButton::textColourOnId, theme::accentText);
+        b->setTooltip ("Send this channel to main " + String (m + 1));
+        b->onClick = [this, m]
+        {
+            engine.strip (index).toMain[(size_t) m] = mains[m]->getToggleState();
+            if (onChange) onChange();
+        };
+        addAndMakeVisible (b);
+    }
+    WebLook::setStyle (pre, "small");
+    pre.setClickingTogglesState (true);
+    pre.setColour (TextButton::buttonOnColourId, theme::solo);
+    pre.setColour (TextButton::textColourOnId, Colour (0xff111111));
+    pre.setTooltip ("Pre fader: the send ignores the channel fader (usual for monitor mixes). Off: it follows the fader.");
+    pre.onClick = [this]
+    {
+        if (sendsAux >= 0) engine.strip (index).sendPre[(size_t) sendsAux] = pre.getToggleState();
+        if (onChange) onChange();
+    };
+    addChildComponent (pre);
+
     meter.setTooltip ("Level before the fader (after gain and plugins), so it shows even when the fader is down or muted. Click to reset the peak.");
     addAndMakeVisible (meter);
 
@@ -187,12 +216,27 @@ void ChannelStrip::refreshFromEngine()
     auto& st = engine.strip (index);
     gain.setValue (st.trimDb.load(), dontSendNotification);
     pan.setValue (st.pan.load(), dontSendNotification);
-    fader.setValue (st.faderDb.load(), dontSendNotification);
+    fader.setValue (sendsAux >= 0 ? st.sendDb[(size_t) sendsAux].load() : st.faderDb.load(), dontSendNotification);
     mute.setToggleState (st.mute.load(), dontSendNotification);
     solo.setToggleState (st.solo.load(), dontSendNotification);
+    for (int m = 0; m < mains.size(); ++m) mains[m]->setToggleState (st.toMain[(size_t) m].load(), dontSendNotification);
+    if (sendsAux >= 0) pre.setToggleState (st.sendPre[(size_t) sendsAux].load(), dontSendNotification);
     gainValue.setText (fmtDb ((float) gain.getValue()), dontSendNotification);
     panValue.setText (fmtPan ((float) pan.getValue()), dontSendNotification);
     dbValue.setText (fmtDb ((float) fader.getValue()), dontSendNotification);
+}
+
+void ChannelStrip::setSendsOnFader (int aux)
+{
+    if (aux == sendsAux) return;
+    sendsAux = aux;
+    const bool sends = aux >= 0;
+    pre.setVisible (sends);
+    for (auto* c : { (Component*) &pan, (Component*) &panLabel, (Component*) &panValue })
+        c->setVisible (! sends);
+    fader.setTooltip (sends ? "Send to Aux " + String (aux + 1) + ". Double-click for 0 dB." : String ("Fader. Double-click for 0 dB."));
+    refreshFromEngine();
+    repaint();
 }
 
 void ChannelStrip::push()
@@ -200,7 +244,8 @@ void ChannelStrip::push()
     auto& st = engine.strip (index);
     st.trimDb = (float) gain.getValue();
     st.pan = (float) pan.getValue();
-    st.faderDb = (float) fader.getValue();
+    if (sendsAux >= 0) st.sendDb[(size_t) sendsAux] = (float) fader.getValue();
+    else st.faderDb = (float) fader.getValue();
     st.mute = mute.getToggleState();
     st.solo = solo.getToggleState();
     gainValue.setText (fmtDb ((float) gain.getValue()), dontSendNotification);
@@ -244,7 +289,21 @@ void ChannelStrip::resized()
         addPlugin.setBounds (a.removeFromTop (22));
     }
     r.removeFromTop (6);
+    pre.setBounds (r.getX(), r.getY() + 8, r.getWidth(), 22);
     knob (panLabel, panValue, pan);
+    mainsLabel.setBounds (r.removeFromTop (12));
+    for (int row = 0; row < 2; ++row)
+    {
+        auto line = r.removeFromTop (18);
+        const int w = (line.getWidth() - 3 * 3) / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            mains[row * 4 + i]->setBounds (line.removeFromLeft (w));
+            line.removeFromLeft (3);
+        }
+        r.removeFromTop (3);
+    }
+    r.removeFromTop (4);
 
     auto buttons = r.removeFromBottom (22);
     mute.setBounds (buttons.removeFromLeft ((buttons.getWidth() - 4) / 2));
@@ -269,8 +328,8 @@ void ChannelStrip::paint (Graphics& g)
     auto r = getLocalBounds().toFloat().reduced (0.5f);
     g.setColour (theme::panel);
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (theme::line);
-    g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    g.setColour (sendsAux >= 0 ? theme::solo : theme::line);
+    g.drawRoundedRectangle (r, 6.0f, sendsAux >= 0 ? 1.5f : 1.0f);
 
     // dB marks beside the fader, lined up with the cap's centre line.
     const float top = (float) fader.getY() + 23.0f, travel = (float) fader.getHeight() - 46.0f;
@@ -284,6 +343,109 @@ void ChannelStrip::paint (Graphics& g)
                     Justification::centredRight);
         g.fillRect ((float) scaleArea.getRight() - 4.0f, y, 4.0f, 1.0f);
     }
+}
+
+//==============================================================================
+static void paintFaderScale (Graphics& g, const Slider& fader, Rectangle<int> scaleArea)
+{
+    // dB marks beside the fader, lined up with the cap's centre line.
+    const float top = (float) fader.getY() + 23.0f, travel = (float) fader.getHeight() - 46.0f;
+    g.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 9.0f, Font::plain));
+    for (int db : { 10, 5, 0, -5, -10, -20, -30, -40, -60 })
+    {
+        const float y = std::round (top + (1.0f - (db + 60.0f) / 70.0f) * travel) + 0.5f;
+        g.setColour (db == 0 ? theme::text : theme::textMuted);
+        g.drawText (db > 0 ? "+" + String (db) : String (db),
+                    Rectangle<float> ((float) scaleArea.getX() - 8.0f, y - 6.0f, (float) scaleArea.getWidth() + 2.0f, 12.0f),
+                    Justification::centredRight);
+        g.fillRect ((float) scaleArea.getRight() - 4.0f, y, 4.0f, 1.0f);
+    }
+}
+
+BusStrip::BusStrip (AudioEngine& e, bool main, int i) : engine (e), isMain (main), index (i)
+{
+    smallLabel (name, (isMain ? "Main " : "Aux ") + String (i + 1), Justification::centredLeft, theme::text);
+    name.setFont (FontOptions (13.0f, Font::bold));
+    smallLabel (dbValue, "0.0", Justification::centred, theme::text);
+    dbValue.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 11.0f, Font::plain));
+    addAndMakeVisible (name);
+    addAndMakeVisible (dbValue);
+
+    fader.setSliderStyle (Slider::LinearVertical);
+    WebLook::setStyle (fader, "fader");
+    fader.setRange (-60.0, 10.0, 0.1);
+    fader.setDoubleClickReturnValue (true, 0.0);
+    fader.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    fader.setMouseCursor (MouseCursor::UpDownResizeCursor);
+    fader.setVelocityBasedMode (false);
+    fader.setTooltip (isMain && i == 0 ? String ("Main 1 is the master (the same fader as in the top bar). Double-click for 0 dB.")
+                                       : String ("Bus master. Double-click for 0 dB."));
+    fader.onValueChange = [this]
+    {
+        bus().faderDb = (float) fader.getValue();
+        dbValue.setText (fmtDb ((float) fader.getValue()), dontSendNotification);
+        if (onChange) onChange();
+    };
+    addAndMakeVisible (fader);
+
+    WebLook::setStyle (mute, "small");
+    mute.setClickingTogglesState (true);
+    mute.setColour (TextButton::buttonOnColourId, theme::mute);
+    mute.setColour (TextButton::textColourOnId, Colour (0xff111111));
+    mute.setTooltip ("Mute this bus");
+    mute.onClick = [this] { bus().mute = mute.getToggleState(); if (onChange) onChange(); };
+    addAndMakeVisible (mute);
+
+    meterL.setTooltip ("Bus level after its fader. Click to reset the peak.");
+    meterR.setTooltip ("Bus level after its fader. Click to reset the peak.");
+    addAndMakeVisible (meterL);
+    if (isMain) addAndMakeVisible (meterR);
+    refreshFromEngine();
+}
+
+void BusStrip::refreshFromEngine()
+{
+    fader.setValue (bus().faderDb.load(), dontSendNotification);
+    mute.setToggleState (bus().mute.load(), dontSendNotification);
+    dbValue.setText (fmtDb ((float) fader.getValue()), dontSendNotification);
+}
+
+void BusStrip::tick()
+{
+    if (isMain)
+    {
+        meterL.setLevel (engine.takeMainPeak (index, 0));
+        meterR.setLevel (engine.takeMainPeak (index, 1));
+    }
+    else meterL.setLevel (engine.takeAuxPeak (index));
+}
+
+void BusStrip::resized()
+{
+    auto r = getLocalBounds().reduced (6);
+    name.setBounds (r.removeFromTop (17));
+    r.removeFromTop (8);
+    mute.setBounds (r.removeFromBottom (22));
+    r.removeFromBottom (6);
+    dbValue.setBounds (r.removeFromBottom (14));
+    r.removeFromBottom (6);
+    auto area = r.withSizeKeepingCentre (isMain ? 78 : 68, r.getHeight());
+    meterL.setBounds (area.removeFromLeft (isMain ? 7 : 10));
+    if (isMain) { area.removeFromLeft (1); meterR.setBounds (area.removeFromLeft (7)); }
+    area.removeFromLeft (2);
+    scaleArea = area.removeFromLeft (22);
+    area.removeFromLeft (2);
+    fader.setBounds (area.removeFromLeft (32));
+}
+
+void BusStrip::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (theme::panel);
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (isMain ? theme::accent.withAlpha (0.6f) : theme::line);
+    g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    paintFaderScale (g, fader, scaleArea);
 }
 
 //==============================================================================
@@ -324,6 +486,39 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
     addAndMakeVisible (viewport);
+
+    // Buses: 12 auxes then 8 mains, shown instead of the channels.
+    for (int a = 0; a < AudioEngine::numAux; ++a) buses.add (new BusStrip (engine, false, a));
+    for (int m = 0; m < AudioEngine::numMains; ++m) buses.add (new BusStrip (engine, true, m));
+    for (auto* b : buses)
+    {
+        b->onChange = [this] { if (onChange) onChange(); };
+        busHolder.addAndMakeVisible (b);
+    }
+    busViewport.setViewedComponent (&busHolder, false);
+    busViewport.setScrollBarsShown (false, true);
+    addChildComponent (busViewport);
+
+    for (auto* t : { &channelsTab, &busesTab })
+    {
+        WebLook::setStyle (*t, "mode");
+        addAndMakeVisible (*t);
+    }
+    channelsTab.setToggleState (true, dontSendNotification);
+    channelsTab.onClick = [this] { showBuses = false; channelsTab.setToggleState (true, dontSendNotification); busesTab.setToggleState (false, dontSendNotification); resized(); };
+    busesTab.onClick = [this] { showBuses = true; channelsTab.setToggleState (false, dontSendNotification); busesTab.setToggleState (true, dontSendNotification); resized(); };
+    busesTab.setTooltip ("The 12 aux and 8 main bus masters. Patch them to outputs in Patch > Outputs.");
+
+    faderLabel.setText ("Faders:", dontSendNotification);
+    faderLabel.setFont (FontOptions (13.0f));
+    faderLabel.setColour (Label::textColourId, theme::textMuted);
+    addAndMakeVisible (faderLabel);
+    faderMode.addItem ("Main mix", 1);
+    for (int a = 0; a < AudioEngine::numAux; ++a) faderMode.addItem ("Aux " + String (a + 1) + " sends", a + 2);
+    faderMode.setSelectedId (1, dontSendNotification);
+    faderMode.setTooltip ("Choose an aux to set every channel's send to it with the channel faders (like sends on fader on a console).");
+    faderMode.onChange = [this] { for (auto* st : strips) st->setSendsOnFader (faderMode.getSelectedId() - 2); };
+    addAndMakeVisible (faderMode);
     refresh();
 }
 
@@ -336,6 +531,7 @@ void ConsoleView::rebuild (int n, const StringArray& names)
         {
             auto* s = strips.add (new ChannelStrip (engine, host, i));
             s->onChange = [this] { if (onChange) onChange(); };
+            s->setSendsOnFader (faderMode.getSelectedId() - 2);
             stripHolder.addAndMakeVisible (s);
         }
         resized();
@@ -386,7 +582,13 @@ void ConsoleView::refreshInserts (int track)
 
 void ConsoleView::tick()
 {
-    for (auto* s : strips) s->tick();
+    if (showBuses) for (auto* b : buses) b->tick();
+    else for (auto* s : strips) s->tick();
+}
+
+void ConsoleView::refreshBuses()
+{
+    for (auto* b : buses) b->refreshFromEngine();
 }
 
 void ConsoleView::resized()
@@ -395,6 +597,21 @@ void ConsoleView::resized()
     auto bar = r.removeFromTop (46).reduced (16, 8).withTrimmedBottom (1);
     auto width = [] (const String& t, bool bold = false)
     { return GlyphArrangement::getStringWidthInt (FontOptions (13.0f, bold ? Font::bold : Font::plain), t); };
+
+    const int tabW = width ("Channels", true) + 24, busW = width ("Buses", true) + 24;
+    viewPill = bar.removeFromLeft (tabW + busW + 10).withSizeKeepingCentre (tabW + busW + 10, 30);
+    {
+        auto p = viewPill.reduced (3);
+        channelsTab.setBounds (p.removeFromLeft (tabW));
+        p.removeFromLeft (4);
+        busesTab.setBounds (p.removeFromLeft (busW));
+    }
+    bar.removeFromLeft (14);
+    faderLabel.setBounds (bar.removeFromLeft (width ("Faders:") + 6));
+    faderMode.setBounds (bar.removeFromLeft (150).reduced (0, 1));
+    faderMode.setVisible (! showBuses);
+    faderLabel.setVisible (! showBuses);
+    bar.removeFromLeft (14);
 
     output.setBounds (bar.removeFromLeft (jmin (bar.getWidth() / 2, width (output.getText()) + 10)));
     bar.removeFromLeft (12);
@@ -406,6 +623,21 @@ void ConsoleView::resized()
     bar.removeFromRight (12);
     hint.setBounds (bar);
 
+    viewport.setVisible (! showBuses);
+    busViewport.setVisible (showBuses);
+    busViewport.setBounds (r);
+    {
+        const int bh = jmax (300, busViewport.getMaximumVisibleHeight());
+        const int gap = 4, pad = 16, top = 10, groupGap = 18;
+        busHolder.setSize (pad * 2 + buses.size() * (ChannelStrip::width + gap) + groupGap, bh);
+        int x = pad;
+        for (int i = 0; i < buses.size(); ++i)
+        {
+            if (i == AudioEngine::numAux) x += groupGap; // a gap between the auxes and the mains
+            buses[i]->setBounds (x, top, ChannelStrip::width, bh - top - 10);
+            x += ChannelStrip::width + gap;
+        }
+    }
     viewport.setBounds (r);
     const int h = jmax (300, viewport.getMaximumVisibleHeight());
     const int gap = 4, pad = 16, top = 10;
@@ -418,6 +650,8 @@ void ConsoleView::paint (Graphics& g)
 {
     g.setColour (theme::line);
     g.fillRect (0, 45, getWidth(), 1);
+    g.setColour (theme::panel);
+    g.fillRoundedRectangle (viewPill.toFloat(), 8.0f);
 }
 
 String ConsoleView::saveState() const
@@ -432,12 +666,35 @@ String ConsoleView::saveState() const
         o->setProperty ("pan", st.pan.load());
         o->setProperty ("mute", st.mute.load());
         o->setProperty ("solo", st.solo.load());
+        Array<var> sends, pre, mains;
+        for (int a = 0; a < AudioEngine::numAux; ++a) { sends.add (st.sendDb[(size_t) a].load()); pre.add (st.sendPre[(size_t) a].load()); }
+        for (int m = 0; m < AudioEngine::numMains; ++m) mains.add (st.toMain[(size_t) m].load());
+        o->setProperty ("sends", sends);
+        o->setProperty ("pre", pre);
+        o->setProperty ("mains", mains);
         list.add (var (o));
+    }
+    Array<var> auxList, mainList;
+    for (int a = 0; a < AudioEngine::numAux; ++a)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("fader", engine.aux (a).faderDb.load());
+        o->setProperty ("mute", engine.aux (a).mute.load());
+        auxList.add (var (o));
+    }
+    for (int m = 0; m < AudioEngine::numMains; ++m)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("fader", engine.mainBus (m).faderDb.load());
+        o->setProperty ("mute", engine.mainBus (m).mute.load());
+        mainList.add (var (o));
     }
     auto* root = new DynamicObject();
     root->setProperty ("strips", list);
     root->setProperty ("limiter", engine.limiterEnabled());
     root->setProperty ("master", engine.getMasterDb());
+    root->setProperty ("aux", auxList);
+    root->setProperty ("mainBuses", mainList);
     return JSON::toString (var (root), true);
 }
 
@@ -455,11 +712,36 @@ void ConsoleView::loadState (const String& json)
             st.pan = jlimit (-1.0f, 1.0f, (float) o.getProperty ("pan", 0.0));
             st.mute = (bool) o.getProperty ("mute", false);
             st.solo = (bool) o.getProperty ("solo", false);
+            auto* sends = o["sends"].getArray();
+            auto* pre = o["pre"].getArray();
+            auto* mains = o["mains"].getArray();
+            for (int a = 0; a < AudioEngine::numAux; ++a)
+            {
+                st.sendDb[(size_t) a] = sends != nullptr && a < sends->size() ? jlimit (-60.0f, 10.0f, (float) (*sends)[a]) : -60.0f;
+                st.sendPre[(size_t) a] = pre != nullptr && a < pre->size() ? (bool) (*pre)[a] : true;
+            }
+            for (int m = 0; m < AudioEngine::numMains; ++m)
+                st.toMain[(size_t) m] = mains != nullptr && m < mains->size() ? (bool) (*mains)[m] : m == 0;
         }
+    if (auto* list = v["aux"].getArray())
+        for (int a = 0; a < list->size() && a < AudioEngine::numAux; ++a)
+        {
+            engine.aux (a).faderDb = jlimit (-60.0f, 10.0f, (float) (*list)[a].getProperty ("fader", 0.0));
+            engine.aux (a).mute = (bool) (*list)[a].getProperty ("mute", false);
+        }
+    if (auto* list = v["mainBuses"].getArray())
+        for (int m = 1; m < list->size() && m < AudioEngine::numMains; ++m) // main 1's fader is "master"
+        {
+            engine.mainBus (m).faderDb = jlimit (-60.0f, 10.0f, (float) (*list)[m].getProperty ("fader", 0.0));
+            engine.mainBus (m).mute = (bool) (*list)[m].getProperty ("mute", false);
+        }
+    if (auto* list = v["mainBuses"].getArray(); list != nullptr && list->size() > 0)
+        engine.mainBus (0).mute = (bool) (*list)[0].getProperty ("mute", false);
     if (v.hasProperty ("limiter")) engine.setLimiter ((bool) v["limiter"]);
     if (v.hasProperty ("master")) engine.setMasterDb (jlimit (-60.0f, 10.0f, (float) v["master"]));
     limiter.setToggleState (engine.limiterEnabled(), dontSendNotification);
     for (auto* s : strips) s->refreshFromEngine();
+    refreshBuses();
 }
 
 //==============================================================================

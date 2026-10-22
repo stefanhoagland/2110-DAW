@@ -50,24 +50,41 @@ public:
     juce::StringArray lastTakeFiles() const { return takeFiles; }
 
     // ---- Live mix (the Live tab) ----
-    // Each input: trim -> fader -> pan into a stereo bus -> master fader ->
-    // optional limiter -> the first two outputs of the device. Same chain as the
-    // web version's Live mode. Controls are atomics so the UI can set them any time.
+    // Each track: trim -> inserts -> fader -> pan into the stereo mains it's assigned
+    // to, and into the 12 mono aux buses through its sends (pre or post fader).
+    // Main 1 is the master: its fader is the master fader and it has the limiter.
+    // Every bus can be patched to any outputs. Controls are atomics so the UI can set
+    // them any time.
+    static constexpr int numAux = 12, numMains = 8;
     struct Strip
     {
+        Strip();
         std::atomic<float> trimDb { 0.0f };   // -20..+20
         std::atomic<float> faderDb { 0.0f };  // -60..+10; at or below -60 is off
         std::atomic<float> pan { 0.0f };      // -1 (left)..+1 (right)
         std::atomic<bool> mute { false }, solo { false };
+        std::array<std::atomic<float>, numAux> sendDb;   // -60 (off)..+10
+        std::array<std::atomic<bool>, numAux> sendPre;   // pre-fader (the default, for monitor mixes)
+        std::array<std::atomic<bool>, numMains> toMain;  // assigned mains (main 1 by default)
     };
     Strip& strip (int channel) { return strips[(size_t) juce::jlimit (0, maxChannels - 1, channel)]; }
+
+    struct Bus
+    {
+        std::atomic<float> faderDb { 0.0f };
+        std::atomic<bool> mute { false };
+    };
+    Bus& aux (int a) { return auxBuses[(size_t) juce::jlimit (0, numAux - 1, a)]; }
+    Bus& mainBus (int m) { return mainBuses[(size_t) juce::jlimit (0, numMains - 1, m)]; }
+    float takeAuxPeak (int a);
+    float takeMainPeak (int m, int side);
 
     void setLive (bool on) { liveOn = on; }
     bool isLive() const { return liveOn.load(); }
     void setLimiter (bool on) { limiterOn = on; }
     bool limiterEnabled() const { return limiterOn.load(); }
-    void setMasterDb (float db) { masterDb = db; }
-    float getMasterDb() const { return masterDb.load(); }
+    void setMasterDb (float db) { mainBuses[0].faderDb = db; }
+    float getMasterDb() const { return mainBuses[0].faderDb.load(); }
     int numOutputs() const { return outputCount.load(); }
     double outputLatencyMs() const;
 
@@ -104,8 +121,12 @@ public:
     void setTrackSource (int track, int deviceInput);
     int getTrackSource (int track) const;
     // Output patch: any source to any device output (several sources on one output add up).
-    // Sources: 0 = live mix left, 1 = live mix right, 2 + t = track t's direct signal.
-    static constexpr int mixLeft = 0, mixRight = 1, firstDirect = 2, numSources = 2 + maxChannels;
+    // Sources: 0/1 = main 1 (the live mix) left/right, 2 + t = track t's direct signal,
+    // then aux 1-12, then mains 2-8 left/right (added later, so saved patches keep their numbers).
+    static constexpr int mixLeft = 0, mixRight = 1, firstDirect = 2, firstAux = 2 + maxChannels,
+                         firstMain = firstAux + numAux, // main 2 left; main m (0-based, m >= 1) left = firstMain + 2 * (m - 1)
+                         numSources = firstMain + 2 * (numMains - 1);
+    static int mainSource (int m, int side) { return m == 0 ? side : firstMain + 2 * (m - 1) + side; }
     void setPatch (int source, int output, bool on);
     bool getPatch (int source, int output) const;
     void resetPatches(); // 1:1 inputs, mix to outputs 1 and 2
@@ -167,14 +188,20 @@ private:
     std::atomic<double> currentRate { 0.0 };
 
     std::array<Strip, maxChannels> strips;
+    std::array<Bus, numAux> auxBuses;
+    std::array<Bus, numMains> mainBuses;
     std::array<std::atomic<float>, maxChannels> stripPeaks {};
-    std::array<std::atomic<float>, 2> masterPeaks {};
-    std::array<float, maxChannels> lastL {}, lastR {}; // gains used last block, for smooth changes
+    std::array<std::atomic<float>, 2 * numMains> mainPeaks {};
+    std::array<std::atomic<float>, numAux> auxPeaks {};
+    // Gains used last block, for smooth changes.
+    std::array<std::array<float, 2 * numMains>, numTracks> lastMainGain {};
+    std::array<std::array<float, numAux>, numTracks> lastSendGain {};
+    std::array<float, numMains> lastMainMaster {};
+    std::array<float, numAux> lastAuxMaster {};
     std::atomic<bool> liveOn { true }, limiterOn { true };
-    std::atomic<float> masterDb { 0.0f };
     std::atomic<int> outputCount { 0 };
-    float lastMaster = 0.0f, limiterEnv = 0.0f, limiterRelease = 0.0f;
-    juce::AudioBuffer<float> work, bus;
+    float limiterEnv = 0.0f, limiterRelease = 0.0f;
+    juce::AudioBuffer<float> work, bus, auxBus; // bus: the mains, left/right in pairs
 
     juce::SpinLock writersLock; // held by the audio thread while writing; by start/stop to swap
     std::vector<std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter>> writers; // by device channel

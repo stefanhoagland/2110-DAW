@@ -189,18 +189,26 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
     inGrid.corner = String (CharPointer_UTF8 ("Interface inputs \xe2\x86\x93\nTracks \xe2\x86\x92"));
 
     // Outputs: any source to any output; several sources on one output are mixed.
-    outGrid.numRows = [] { return 2 + AudioEngine::numTracks; };
+    // Rows: mains 1-8 (left, right), auxes 1-12, then each track's direct signal.
+    constexpr int mainRows = 2 * AudioEngine::numMains, busRows = mainRows + AudioEngine::numAux;
+    auto source = [] (int r)
+    {
+        if (r < mainRows) return AudioEngine::mainSource (r / 2, r % 2);
+        if (r < busRows) return AudioEngine::firstAux + (r - mainRows);
+        return AudioEngine::firstDirect + (r - busRows);
+    };
+    outGrid.numRows = [] { return busRows + AudioEngine::numTracks; };
     outGrid.numCols = [this] { return engine.numOutputs(); };
     outGrid.rowName = [this] (int r)
     {
-        if (r == AudioEngine::mixLeft) return String ("Live mix L");
-        if (r == AudioEngine::mixRight) return String ("Live mix R");
-        const int t = r - AudioEngine::firstDirect;
+        if (r < mainRows) return "Main " + String (r / 2 + 1) + (r % 2 == 0 ? " L" : " R") + (r < 2 ? "  (master)" : "");
+        if (r < busRows) return "Aux " + String (r - mainRows + 1);
+        const int t = r - busRows;
         return "Track " + String (t + 1) + " direct  " + trackName (t);
     };
     outGrid.colName = [this] (int c) { return outputName (c); };
-    outGrid.isOn = [this] (int r, int c) { return engine.getPatch (r, c); };
-    outGrid.setOn = [this] (int r, int c, bool on) { engine.setPatch (r, c, on); if (onChange) onChange(); };
+    outGrid.isOn = [this, source] (int r, int c) { return engine.getPatch (source (r), c); };
+    outGrid.setOn = [this, source] (int r, int c, bool on) { engine.setPatch (source (r), c, on); if (onChange) onChange(); };
     outGrid.corner = String (CharPointer_UTF8 ("Sources \xe2\x86\x93\nInterface outputs \xe2\x86\x92"));
 
     for (auto* v : { &inView, &outView })

@@ -140,10 +140,12 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
         const SpinLock::ScopedLockType lock (insertLocks[(size_t) t]);
         for (auto& ins : inserts[(size_t) t]) prepare (*ins);
     }
-    bus.setSize (2, block, false, true, false);
-    lastL.fill (0.0f);
-    lastR.fill (0.0f);
-    lastMaster = 0.0f;
+    bus.setSize (2 * numMains, block, false, true, false);
+    auxBus.setSize (numAux, block, false, true, false);
+    for (auto& g : lastMainGain) g.fill (0.0f);
+    for (auto& g : lastSendGain) g.fill (0.0f);
+    lastMainMaster.fill (0.0f);
+    lastAuxMaster.fill (0.0f);
     limiterEnv = 0.0f;
     // About 100 ms release, like the web version's limiter.
     limiterRelease = (float) std::exp (-1.0 / (0.1 * jmax (1.0, dev->getCurrentSampleRate())));
@@ -166,7 +168,24 @@ float AudioEngine::takeStripPeak (int channel)
 
 float AudioEngine::takeMasterPeak (int side)
 {
-    return masterPeaks[(size_t) jlimit (0, 1, side)].exchange (0.0f);
+    return takeMainPeak (0, side);
+}
+
+float AudioEngine::takeMainPeak (int m, int side)
+{
+    return mainPeaks[(size_t) (jlimit (0, numMains - 1, m) * 2 + jlimit (0, 1, side))].exchange (0.0f);
+}
+
+float AudioEngine::takeAuxPeak (int a)
+{
+    return auxPeaks[(size_t) jlimit (0, numAux - 1, a)].exchange (0.0f);
+}
+
+AudioEngine::Strip::Strip()
+{
+    for (auto& d : sendDb) d = -60.0f;
+    for (auto& p : sendPre) p = true;
+    for (size_t m = 0; m < toMain.size(); ++m) toMain[m] = m == 0;
 }
 
 void AudioEngine::audioDeviceStopped()
@@ -293,14 +312,22 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         anySolo = anySolo || strips[(size_t) t].solo.load (std::memory_order_relaxed);
 
     bus.clear (0, numSamples);
+    auxBus.clear (0, numSamples);
     auto* w = work.getWritePointer (0);
     for (int t = 0; t < tracks; ++t)
     {
         const float* in = trackIn[(size_t) t];
-        if (in == nullptr) continue;
         const auto ch = (size_t) t;
+        if (in == nullptr)
+        {
+            // Nothing patched: let any ramps from last block finish at silence next time.
+            lastMainGain[ch].fill (0.0f);
+            lastSendGain[ch].fill (0.0f);
+            continue;
+        }
         auto& st = strips[ch];
-        const bool audible = ! st.mute.load (std::memory_order_relaxed) && (! anySolo || st.solo.load (std::memory_order_relaxed));
+        const bool muted = st.mute.load (std::memory_order_relaxed);
+        const bool audible = ! muted && (! anySolo || st.solo.load (std::memory_order_relaxed));
 
         // Trim, then the plugin inserts.
         const float trim = Decibels::decibelsToGain (st.trimDb.load (std::memory_order_relaxed));
@@ -309,31 +336,61 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         lastTrim[ch] = trim;
         runInserts (t, w, numSamples);
 
-        // Mute, solo and the fader set what goes to the mix; the meter shows the level
-        // before them, so you can see a channel is live even when it's pulled down.
+        // Pre-fader meter (after gain and plugins), like the web strip meter.
+        storeMax (stripPeaks[ch], work.getMagnitude (0, 0, numSamples));
+
+        // Mute, solo and the fader set what goes to the mains.
         const float fader = faderGain (st.faderDb.load (std::memory_order_relaxed));
         const float gain = audible ? fader : 0.0f;
         // Constant-power pan, the same law as the web's StereoPannerNode for a mono source.
         const float x = (jlimit (-1.0f, 1.0f, st.pan.load (std::memory_order_relaxed)) + 1.0f) * 0.5f;
         const float gl = gain * std::cos (x * MathConstants<float>::halfPi);
         const float gr = gain * std::sin (x * MathConstants<float>::halfPi);
-
-        // Pre-fader meter (after gain and plugins), like the web strip meter.
-        storeMax (stripPeaks[ch], work.getMagnitude (0, 0, numSamples));
-
-        if (gl > 0.0f || gr > 0.0f || lastL[ch] > 0.0f || lastR[ch] > 0.0f)
+        auto& lastM = lastMainGain[ch];
+        for (int m = 0; m < numMains; ++m)
         {
-            bus.addFromWithRamp (0, 0, w, numSamples, lastL[ch], gl);
-            bus.addFromWithRamp (1, 0, w, numSamples, lastR[ch], gr);
+            const bool on = st.toMain[(size_t) m].load (std::memory_order_relaxed);
+            for (int side = 0; side < 2; ++side)
+            {
+                const float target = on ? (side == 0 ? gl : gr) : 0.0f;
+                auto& last = lastM[(size_t) (m * 2 + side)];
+                if (target > 0.0f || last > 0.0f)
+                    bus.addFromWithRamp (m * 2 + side, 0, w, numSamples, last, target);
+                last = target;
+            }
         }
-        lastL[ch] = gl;
-        lastR[ch] = gr;
+
+        // Aux sends: mute cuts them, solo doesn't (so monitor mixes don't change when
+        // someone solos at front of house). Pre-fader sends ignore the fader.
+        auto& lastS = lastSendGain[ch];
+        for (int a = 0; a < numAux; ++a)
+        {
+            const float send = muted ? 0.0f : faderGain (st.sendDb[(size_t) a].load (std::memory_order_relaxed))
+                                                  * (st.sendPre[(size_t) a].load (std::memory_order_relaxed) ? 1.0f : fader);
+            auto& last = lastS[(size_t) a];
+            if (send > 0.0f || last > 0.0f)
+                auxBus.addFromWithRamp (a, 0, w, numSamples, last, send);
+            last = send;
+        }
     }
 
-    // Master fader, then the limiter (instant attack, stereo-linked, ceiling -1 dB).
-    const float master = faderGain (masterDb.load (std::memory_order_relaxed));
-    bus.applyGainRamp (0, numSamples, lastMaster, master);
-    lastMaster = master;
+    // Bus masters. Main 1 then goes through the limiter (instant attack, stereo-linked, ceiling -1 dB).
+    for (int m = 0; m < numMains; ++m)
+    {
+        auto& b = mainBuses[(size_t) m];
+        const float g = b.mute.load (std::memory_order_relaxed) ? 0.0f : faderGain (b.faderDb.load (std::memory_order_relaxed));
+        for (int side = 0; side < 2; ++side)
+            bus.applyGainRamp (m * 2 + side, 0, numSamples, lastMainMaster[(size_t) m], g);
+        lastMainMaster[(size_t) m] = g;
+    }
+    for (int a = 0; a < numAux; ++a)
+    {
+        auto& b = auxBuses[(size_t) a];
+        const float g = b.mute.load (std::memory_order_relaxed) ? 0.0f : faderGain (b.faderDb.load (std::memory_order_relaxed));
+        auxBus.applyGainRamp (a, 0, numSamples, lastAuxMaster[(size_t) a], g);
+        lastAuxMaster[(size_t) a] = g;
+        storeMax (auxPeaks[(size_t) a], auxBus.getMagnitude (a, 0, numSamples));
+    }
     if (limiterOn.load (std::memory_order_relaxed))
     {
         constexpr float ceiling = 0.891f; // -1 dBFS
@@ -355,8 +412,8 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
     {
         limiterEnv = 0.0f; // start fresh when it's switched back on
     }
-    storeMax (masterPeaks[0], bus.getMagnitude (0, 0, numSamples));
-    storeMax (masterPeaks[1], bus.getMagnitude (1, 0, numSamples));
+    for (int c = 0; c < 2 * numMains; ++c)
+        storeMax (mainPeaks[(size_t) c], bus.getMagnitude (c, 0, numSamples));
 
     // Output patch. The mix goes out unless muted (only when the app closes); direct track signals always do.
     const bool live = liveOn.load (std::memory_order_relaxed);
@@ -367,9 +424,15 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         if (! isPositiveAndBelow (idx, numOuts) || outputs[idx] == nullptr) continue;
         auto* dest = outputs[idx];
         if (live)
-            for (int side = 0; side < 2; ++side)
-                if (patch[(size_t) (side * maxChannels + o)].load (std::memory_order_relaxed))
-                    FloatVectorOperations::add (dest, bus.getReadPointer (side), numSamples);
+        {
+            for (int m = 0; m < numMains; ++m)
+                for (int side = 0; side < 2; ++side)
+                    if (patch[(size_t) (mainSource (m, side) * maxChannels + o)].load (std::memory_order_relaxed))
+                        FloatVectorOperations::add (dest, bus.getReadPointer (m * 2 + side), numSamples);
+            for (int a = 0; a < numAux; ++a)
+                if (patch[(size_t) ((firstAux + a) * maxChannels + o)].load (std::memory_order_relaxed))
+                    FloatVectorOperations::add (dest, auxBus.getReadPointer (a), numSamples);
+        }
         for (int t = 0; t < tracks; ++t)
             if (trackIn[(size_t) t] != nullptr
                 && patch[(size_t) ((firstDirect + t) * maxChannels + o)].load (std::memory_order_relaxed))
