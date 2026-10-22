@@ -62,6 +62,7 @@ private:
     void showTimecodeMenu();
     void showNetwork();
     void networkChanged();
+    void sendingChanged();
     juce::String autoName (int track) const;
     bool looksAutomatic (const juce::String& saved, int track) const;
     void applyAutoNames();

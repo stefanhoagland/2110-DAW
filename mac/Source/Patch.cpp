@@ -165,7 +165,7 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
     clearAll.onClick = [this]
     {
         if (page == 0) for (int t = 0; t < AudioEngine::maxChannels; ++t) engine.setTrackSource (t, -1);
-        else for (int s = 0; s < AudioEngine::numSources; ++s) for (int o = 0; o < AudioEngine::maxChannels; ++o) engine.setPatch (s, o, false);
+        else for (int s = 0; s < AudioEngine::numSources; ++s) for (int o = 0; o < AudioEngine::numOutSlots; ++o) engine.setPatch (s, o, false);
         refresh();
         if (onChange) onChange();
     };
@@ -198,7 +198,15 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
         return AudioEngine::firstDirect + (r - busRows);
     };
     outGrid.numRows = [] { return busRows + AudioEngine::numTracks; };
-    outGrid.numCols = [this] { return engine.numOutputs(); };
+    // Columns: the interface's outputs, then the AES67 sending channels.
+    auto output = [this] (int c)
+    {
+        if (c < engine.numOutputs()) return c;
+        const auto used = engine.sending().usedChannels();
+        const int k = c - engine.numOutputs();
+        return isPositiveAndBelow (k, (int) used.size()) ? AudioEngine::firstNetOut + used[(size_t) k] : -1;
+    };
+    outGrid.numCols = [this] { return engine.numOutputs() + (int) engine.sending().usedChannels().size(); };
     outGrid.rowName = [this] (int r)
     {
         if (r < mainRows)
@@ -211,10 +219,14 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
         const int t = r - busRows;
         return "Track " + String (t + 1) + " direct  " + trackName (t);
     };
-    outGrid.colName = [this] (int c) { return outputName (c); };
-    outGrid.isOn = [this, source] (int r, int c) { return engine.getPatch (source (r), c); };
-    outGrid.setOn = [this, source] (int r, int c, bool on) { engine.setPatch (source (r), c, on); if (onChange) onChange(); };
-    outGrid.corner = String (CharPointer_UTF8 ("Sources \xe2\x86\x93\nInterface outputs \xe2\x86\x92"));
+    outGrid.colName = [this, output] (int c)
+    {
+        const int o = output (c);
+        return o >= AudioEngine::firstNetOut ? "AES67  " + engine.sending().channelName (o - AudioEngine::firstNetOut) : outputName (o);
+    };
+    outGrid.isOn = [this, source, output] (int r, int c) { return engine.getPatch (source (r), output (c)); };
+    outGrid.setOn = [this, source, output] (int r, int c, bool on) { engine.setPatch (source (r), output (c), on); if (onChange) onChange(); };
+    outGrid.corner = String (CharPointer_UTF8 ("Sources \xe2\x86\x93\nOutputs \xe2\x86\x92"));
 
     for (auto* v : { &inView, &outView })
     {
@@ -263,7 +275,7 @@ void PatchView::showPage (int p)
     inView.setVisible (p == 0 && inputView == 1);
     outView.setVisible (p == 1);
     help.setText (p == 0 ? (inputView == 0 ? String() : "Pick which interface input feeds each track. Studio records and Live mixes the tracks.")
-                         : "Send the mains, the auxes or any track's input straight to interface outputs.",
+                         : "Send the mains, the auxes or any track's input to interface outputs and AES67 streams (create streams in AES67 network > Send).",
                   dontSendNotification);
     refresh();
 }
@@ -305,9 +317,10 @@ void PatchView::resized()
     bar.removeFromRight (10);
     help.setBounds (bar);
     const bool empty = engine.numInputs() == 0 && engine.numOutputs() == 0;
+    const bool noOutputs = engine.numOutputs() == 0 && engine.sending().usedChannels().empty();
     inView.setBounds (empty ? Rectangle<int>() : r);
     list.setBounds (empty ? Rectangle<int>() : r);
-    outView.setBounds (empty ? Rectangle<int>() : r);
+    outView.setBounds (noOutputs ? Rectangle<int>() : r);
     repaint();
 }
 
@@ -340,7 +353,7 @@ String PatchView::saveOutputs (const AudioEngine& e)
 {
     StringArray list;
     for (int s = 0; s < AudioEngine::numSources; ++s)
-        for (int o = 0; o < AudioEngine::maxChannels; ++o)
+        for (int o = 0; o < AudioEngine::numOutSlots; ++o)
             if (e.getPatch (s, o)) list.add (String (s) + ":" + String (o));
     return list.isEmpty() ? String ("none") : list.joinIntoString (",");
 }
@@ -357,7 +370,7 @@ void PatchView::loadOutputs (AudioEngine& e, const String& text)
 {
     if (text.isEmpty()) return; // never saved: keep the default
     for (int s = 0; s < AudioEngine::numSources; ++s)
-        for (int o = 0; o < AudioEngine::maxChannels; ++o)
+        for (int o = 0; o < AudioEngine::numOutSlots; ++o)
             e.setPatch (s, o, false);
     if (text == "none") return;
     for (auto& item : StringArray::fromTokens (text, ",", {}))

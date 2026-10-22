@@ -131,6 +131,7 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
 
     const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
     netBuf.setSize (aes67::NetworkAudio::maxNetChannels, block, false, true, false);
+    netOutBuf.setSize (aes67::NetworkSend::maxChannels, block, false, true, false);
     work.setSize (1, block, false, true, false);
     fx.setSize (8, block, false, true, false);
     midi.ensureSize (2048);
@@ -444,23 +445,40 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
     for (int o = 0; o < outs; ++o)
     {
         const int idx = outChannelToActive[(size_t) o];
-        if (! isPositiveAndBelow (idx, numOuts) || outputs[idx] == nullptr) continue;
-        auto* dest = outputs[idx];
-        if (live)
-        {
-            for (int m = 0; m < numMains; ++m)
-                for (int side = 0; side < 2; ++side)
-                    if (patch[(size_t) (mainSource (m, side) * maxChannels + o)].load (std::memory_order_relaxed))
-                        FloatVectorOperations::add (dest, bus.getReadPointer (m * 2 + side), numSamples);
-            for (int a = 0; a < numAux; ++a)
-                if (patch[(size_t) ((firstAux + a) * maxChannels + o)].load (std::memory_order_relaxed))
-                    FloatVectorOperations::add (dest, auxBus.getReadPointer (a), numSamples);
-        }
-        for (int t = 0; t < tracks; ++t)
-            if (trackIn[(size_t) t] != nullptr
-                && patch[(size_t) ((firstDirect + t) * maxChannels + o)].load (std::memory_order_relaxed))
-                FloatVectorOperations::add (dest, trackIn[(size_t) t], numSamples);
+        if (isPositiveAndBelow (idx, numOuts) && outputs[idx] != nullptr)
+            mixOutput (outputs[idx], o, tracks, numSamples, live);
     }
+
+    // AES67 sending channels.
+    if (numSamples <= netOutBuf.getNumSamples())
+    {
+        const auto used = netSend.usedChannelCount();
+        for (int c = 0; c < used; ++c)
+        {
+            auto* dest = netOutBuf.getWritePointer (c);
+            FloatVectorOperations::clear (dest, numSamples);
+            mixOutput (dest, firstNetOut + c, tracks, numSamples, live);
+        }
+        if (used > 0) netSend.push (netOutBuf.getArrayOfReadPointers(), used, numSamples, currentRate.load (std::memory_order_relaxed));
+    }
+}
+
+void AudioEngine::mixOutput (float* dest, int o, int tracks, int numSamples, bool live)
+{
+    if (live)
+    {
+        for (int m = 0; m < numMains; ++m)
+            for (int side = 0; side < 2; ++side)
+                if (patch[(size_t) (mainSource (m, side) * numOutSlots + o)].load (std::memory_order_relaxed))
+                    FloatVectorOperations::add (dest, bus.getReadPointer (m * 2 + side), numSamples);
+        for (int a = 0; a < numAux; ++a)
+            if (patch[(size_t) ((firstAux + a) * numOutSlots + o)].load (std::memory_order_relaxed))
+                FloatVectorOperations::add (dest, auxBus.getReadPointer (a), numSamples);
+    }
+    for (int t = 0; t < tracks; ++t)
+        if (trackIn[(size_t) t] != nullptr
+            && patch[(size_t) ((firstDirect + t) * numOutSlots + o)].load (std::memory_order_relaxed))
+            FloatVectorOperations::add (dest, trackIn[(size_t) t], numSamples);
 }
 
 void AudioEngine::setTrackSource (int track, int deviceInput)
@@ -476,14 +494,19 @@ int AudioEngine::getTrackSource (int track) const
 
 void AudioEngine::setPatch (int source, int output, bool on)
 {
-    if (isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, maxChannels))
-        patch[(size_t) (source * maxChannels + output)] = on;
+    if (isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, numOutSlots))
+        patch[(size_t) (source * numOutSlots + output)] = on;
 }
 
 bool AudioEngine::getPatch (int source, int output) const
 {
-    return isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, maxChannels)
-        && patch[(size_t) (source * maxChannels + output)].load();
+    return isPositiveAndBelow (source, numSources) && isPositiveAndBelow (output, numOutSlots)
+        && patch[(size_t) (source * numOutSlots + output)].load();
+}
+
+void AudioEngine::clearOutput (int output)
+{
+    for (int s = 0; s < numSources; ++s) setPatch (s, output, false);
 }
 
 void AudioEngine::resetPatches()

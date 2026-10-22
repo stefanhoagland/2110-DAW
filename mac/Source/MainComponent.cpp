@@ -137,6 +137,9 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     engine.initialise (deviceXml.get());
     engine.network().loadState (settings.getValue ("aes67"));
     engine.network().onChange = [this] { networkChanged(); };
+    engine.sending().loadState (settings.getValue ("aes67send"));
+    engine.sending().setInterface (engine.network().getInterface()); // one network port for both
+    engine.sending().onChange = [this] { sendingChanged(); };
     engine.devices().addChangeListener (this);
     rebuildTracks();
     applyTimecode (settings.getValue ("timecode", "off"), false);
@@ -158,6 +161,7 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
 MainComponent::~MainComponent()
 {
     engine.network().onChange = nullptr;
+    engine.sending().onChange = nullptr;
     if (networkWindow != nullptr) delete networkWindow.getComponent();
     engine.devices().removeChangeListener (this);
     engine.setLive (false);
@@ -417,7 +421,7 @@ void MainComponent::namesFollowPatch()
 }
 
 //==============================================================================
-static const char* const showKeys[] = { "names", "armed", "live", "inserts", "patchIn", "patchOut", "patchNet", "aes67", "timecode" };
+static const char* const showKeys[] = { "names", "armed", "live", "inserts", "patchIn", "patchOut", "patchNet", "aes67", "aes67send", "timecode" };
 
 void MainComponent::refreshShowButton()
 {
@@ -453,6 +457,7 @@ String MainComponent::showToJson()
     saveLive();
     plugins.save();
     settings.setValue ("aes67", engine.network().saveState());
+    settings.setValue ("aes67send", engine.sending().saveState());
     DynamicObject::Ptr o = new DynamicObject();
     o->setProperty ("app", "Soundbending Live");
     o->setProperty ("version", 1);
@@ -516,6 +521,8 @@ void MainComponent::applyShow (const var& v)
     for (int t = 0; t < AudioEngine::maxChannels; ++t) engine.setTrackSource (t, t);
 
     net.loadState (settings.getValue ("aes67"));
+    engine.sending().loadState (settings.getValue ("aes67send"));
+    engine.sending().setInterface (net.getInterface());
     patchIds.clear();
     patchIds.addLines (settings.getValue ("patchNet"));
     PatchView::loadInputs (engine, settings.getValue ("patchIn"));
@@ -915,6 +922,14 @@ void MainComponent::showNetwork()
     o.useNativeTitleBar = true;
     o.resizable = true;
     networkWindow = o.launchAsync();
+}
+
+void MainComponent::sendingChanged()
+{
+    settings.setValue ("aes67send", engine.sending().saveState());
+    if (networkWindow != nullptr)
+        if (auto* v = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) v->refresh();
+    patchView.refresh();
 }
 
 void MainComponent::networkChanged()

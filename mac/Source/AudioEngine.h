@@ -4,6 +4,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "Timecode.h"
 #include "Aes67.h"
+#include "Aes67Send.h"
 
 // Audio input, metering, multitrack recording and the live mix.
 // Every input channel of the interface is a track. While recording, each armed
@@ -30,6 +31,9 @@ public:
     juce::String inputName (int input) const; // "In 3", or the network channel's name
     aes67::NetworkAudio& network() { return net; }
     const aes67::NetworkAudio& network() const { return net; }
+    // AES67 sending. Its channels are outputs too: output firstNetOut + c is network output c.
+    aes67::NetworkSend& sending() { return netSend; }
+    const aes67::NetworkSend& sending() const { return netSend; }
     double sampleRate() const { return currentRate.load(); }
     juce::String deviceDescription() const;
 
@@ -131,10 +135,13 @@ public:
     static constexpr int mixLeft = 0, mixRight = 1, firstDirect = 2, firstAux = 2 + maxChannels,
                          firstMain = firstAux + numAux, // main 2 left; main m (0-based, m >= 1) left = firstMain + 2 * (m - 1)
                          numSources = firstMain + 2 * (numMains - 1);
+    // Outputs: the interface's (0..maxChannels), then the AES67 sending channels.
+    static constexpr int firstNetOut = maxChannels, numOutSlots = maxChannels + aes67::NetworkSend::maxChannels;
     static int mainSource (int m, int side) { return m == 0 ? side : firstMain + 2 * (m - 1) + side; }
     void setPatch (int source, int output, bool on);
     bool getPatch (int source, int output) const;
     void resetPatches(); // 1:1 inputs, mix to outputs 1 and 2
+    void clearOutput (int output); // unpatches every source from it
 
     // ---- Timecode ----
     // An external timecode source: LTC on one interface input, or MIDI timecode (MTC).
@@ -169,6 +176,7 @@ private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
     void stampTake();
     void mixLive (int tracks, float* const* outputs, int numOuts, int numSamples);
+    void mixOutput (float* dest, int output, int tracks, int numSamples, bool live);
 
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread writerThread { "Soundbending Live disk writer" };
@@ -178,7 +186,7 @@ private:
     std::array<int, maxChannels> channelToActive {};  // device input -> callback index, or -1
     std::array<int, maxChannels> outChannelToActive {}; // device output -> callback index, or -1
     std::array<std::atomic<int>, maxChannels> trackSource;
-    std::array<std::atomic<bool>, (size_t) numSources * maxChannels> patch {};
+    std::array<std::atomic<bool>, (size_t) numSources * numOutSlots> patch {};
     std::array<const float*, maxChannels> trackIn {}; // audio thread only
     std::array<float, maxChannels> lastTrim {};
     std::array<InsertList, maxChannels> inserts;           // swapped by the message thread
@@ -190,6 +198,8 @@ private:
     std::atomic<int> inputCount { 0 };
     aes67::NetworkAudio net;
     juce::AudioBuffer<float> netBuf; // network channels for this block
+    aes67::NetworkSend netSend;
+    juce::AudioBuffer<float> netOutBuf; // sending channels for this block
     std::atomic<double> currentRate { 0.0 };
 
     std::array<Strip, maxChannels> strips;

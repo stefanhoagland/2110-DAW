@@ -362,6 +362,72 @@ int main()
         check (engine.numInputs() == 64, "unsubscribing removes the network tracks");
     }
 
+    // ---- AES67 sending ----
+    {
+        // PTP servo: a master 50 ppm fast and 5 s ahead, fed 8 syncs a second.
+        aes67::PtpClock clock;
+        const int64 base = aes67::PtpClock::localNs();
+        const int64 offset = 5000000000LL + 37000000000LL;
+        for (int i = 0; i < 16; ++i)
+        {
+            const int64 local = base - (16 - i) * 125000000LL;
+            clock.addSyncForTest (local, local + offset + (int64) ((local - base) * 50.0e-6));
+        }
+        int64 ptpNs = 0;
+        const bool locked = clock.now (ptpNs);
+        const int64 expect = aes67::PtpClock::localNs() + offset;
+        check (locked && std::abs (ptpNs - expect) < 200000, "PTP fit follows the master (" + String ((ptpNs - expect) / 1000) + " us off)");
+
+        auto& send = engine.sending();
+        send.setInterface ("127.0.0.1");
+        aes67::SendConfig cfg;
+        cfg.name = "Loop send";
+        cfg.address = "127.0.0.1";
+        cfg.port = 46020;
+        cfg.channels = 16;
+        cfg.ptimeUs = 1000;
+        check (send.addStream (cfg).isNotEmpty(), "16 channels are refused at 1 ms packets");
+        cfg.channels = 2;
+        cfg.firstChannel = -1;
+        check (send.addStream (cfg).isEmpty(), "send stream created");
+        check (cfg.firstChannel == 0 && send.usedChannels().size() == 2, "it takes network outputs 1-2");
+        const auto sdp = send.sdpFor (cfg.id());
+        check (sdp.contains ("a=rtpmap:97 L24/48000/2") && sdp.contains ("a=mediaclk:direct=0") && sdp.contains ("a=ts-refclk:ptp=IEEE1588-2008:")
+               && sdp.contains ("a=ptime:1\r\n") && sdp.contains ("o=- " + cfg.id() + " "), "SDP has the AES67 lines");
+        String sapSdp;
+        bool deleted = true;
+        const auto sap = aes67::makeSap (sdp, "127.0.0.1", 1234, false);
+        check (aes67::parseSap (sap.getData(), (int) sap.getSize(), sapSdp, deleted) && ! deleted && sapSdp == sdp, "SAP packet carries the SDP");
+
+        // Track 1's direct signal goes out on the stream; the app's own receiver takes it back.
+        engine.setPatch (AudioEngine::firstDirect + 0, AudioEngine::firstNetOut + 0, true);
+        aes67::StreamInfo back;
+        String why;
+        check (aes67::parseSdp (sdp, back, why) && back.channels == 2 && back.port == 46020, "our SDP reads back " + why);
+        auto& net = engine.network();
+        check (net.subscribe (back).isEmpty(), "receiving our own stream");
+        AudioBuffer<float> in (64, 48), outs (8, 48);
+        in.clear();
+        for (int k = 0; k < 48; ++k) in.setSample (0, k, 0.4f);
+        const auto start = Time::getMillisecondCounterHiRes();
+        float got = 0.0f, other = 0.0f;
+        for (int i = 0; i < 800; ++i)
+        {
+            while (Time::getMillisecondCounterHiRes() - start < i + 1.0) Thread::yield();
+            engine.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), 64, outs.getArrayOfWritePointers(), 8, 48, ctx);
+            if (i == 600) { engine.takePeak (64); engine.takePeak (65); }
+            if (i > 600) { got = jmax (got, engine.takePeak (64)); other = jmax (other, engine.takePeak (65)); }
+        }
+        const auto st = send.status();
+        check (! st.empty() && st[0].sending && st[0].audio && st[0].packets > 300, "stream is sending audio (" + String (st.empty() ? 0 : st[0].packets) + " packets)");
+        check (std::abs (got - 0.4f) < 0.01f && other < 0.001f, "track 1 comes back over AES67 on channel 1 (" + String (got) + ", " + String (other) + ")");
+        net.unsubscribe (back.key());
+        engine.clearOutput (AudioEngine::firstNetOut + 0);
+        check (! engine.getPatch (AudioEngine::firstDirect, AudioEngine::firstNetOut), "clearing a network output unpatches it");
+        send.removeStream (cfg.id());
+        check (send.streams().empty() && send.usedChannels().empty(), "stream removed");
+    }
+
     dir.deleteRecursively();
     std::cout << (failures ? "FAILED\n" : "ALL PASSED\n");
     return failures ? 1 : 0;
