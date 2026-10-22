@@ -160,7 +160,7 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
     solo.setColour (TextButton::buttonOnColourId, theme::solo);
     solo.setColour (TextButton::textColourOnId, Colour (0xff111111));
 
-    meter.setTooltip ("Level after the fader. Click to reset the peak.");
+    meter.setTooltip ("Level before the fader (after gain and plugins), so it shows even when the fader is down or muted. Click to reset the peak.");
     addAndMakeVisible (meter);
 
     WebLook::setStyle (addPlugin, "small-plain");

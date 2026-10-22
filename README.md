@@ -52,7 +52,7 @@ Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channe
 
 The **Live** tab is a mixing console for the inputs, for remixing a live source for a stream:
 
-- One strip per input with gain, plugin slots, pan, a fader with a post-fader meter, mute and solo. Settings are remembered. Double-click any control to reset it.
+- One strip per input with gain, plugin slots, pan, a fader, a meter, mute and solo. The meter shows the level before the fader, so it keeps moving when the fader is down or the channel is muted; only the audio stops. Settings are remembered. Double-click any control to reset it.
 - **Plugins:** use **+ Plugin** on a strip to insert High-pass, Gate, EQ (low shelf, parametric mid, high shelf), Compressor, Limiter, Delay or Reverb, as many as you like, processed top to bottom. Click a plugin to open its editor, where you can adjust it, bypass it, move it earlier or later in the chain, or remove it. Compressor and Limiter show their gain reduction.
 - **Third-party plugins:** browsers can't load VST/AU plugins, but they can load **Web Audio Modules (WAM 2.0)**, plugins built for the web (see [webaudiomodules.com](https://www.webaudiomodules.com)). In **+ Plugin**, pick **Load plugin from URL…** and paste the address of the plugin's `index.js`. If the plugin has its own interface it shows in the editor; otherwise you get a slider per setting. Its settings are saved with the strip, and plugins you've loaded stay in the **+ Plugin** menu.
   - The Docker image comes with four free ones ready in **+ Plugin**: Simple EQ, Simple Delay, Simple Distortion and Microverb (from [burns-audio-wam](https://github.com/boourns/burns-audio-wam), MIT License). For local development, `npm run plugins` downloads them.

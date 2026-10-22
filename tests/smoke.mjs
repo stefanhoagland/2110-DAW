@@ -183,6 +183,10 @@ try {
   }, fn.toString());
   const offPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
   const stripPeak = await maxPeak((d) => d.live.peak(0));
+  // The strip meter is before the fader: it keeps moving with the fader down and muted.
+  await page.evaluate(() => { window.daw.live.set(0, 'fader', 0); window.daw.live.set(0, 'mute', true); });
+  const downMeter = await maxPeak((d) => d.live.peak(0));
+  await page.evaluate(() => { window.daw.live.set(0, 'fader', 60 / 70); window.daw.live.set(0, 'mute', false); });
   await page.click('#btn-live');
   const onPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
   // Plugins: a gate with a 0 dB threshold on channels 1 and 2 silences them;
@@ -252,8 +256,8 @@ try {
   await page.waitForTimeout(200);
   const downPeak = await maxPeak((d) => Math.max(...d.engine.masterPeaks()));
   const liveVisible = await page.isVisible('#console') && !(await page.isVisible('#tracks-area'));
-  const live = { offPeak, stripPeak, onPeak, gatedPeak, bypassPeak, grText, inserts, downPeak, liveVisible };
-  const liveOk = liveVisible && offPeak < 0.001 && stripPeak > 0.05 && onPeak > 0.05 && downPeak < 0.001
+  const live = { offPeak, stripPeak, downMeter, onPeak, gatedPeak, bypassPeak, grText, inserts, downPeak, liveVisible };
+  const liveOk = liveVisible && offPeak < 0.001 && stripPeak > 0.05 && downMeter > 0.05 && onPeak > 0.05 && downPeak < 0.001
     && gatedPeak < 0.01 && bypassPeak > 0.05 && /Gain reduction -\d/.test(grText) && inserts.join() === 'Gate,Compressor';
 
   await page.screenshot({ path: process.env.SCREENSHOT || 'tests/smoke.png' });

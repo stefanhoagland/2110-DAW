@@ -169,6 +169,14 @@ int main()
     check (engine.takeStripPeak (0) > 0.2f, "a muted channel's meter still shows its level");
     engine.strip (0).mute = false;
 
+    const float faderWas = engine.strip (0).faderDb;
+    engine.strip (0).faderDb = -200.0f;
+    engine.takeStripPeak (0);
+    auto [l5b, r5b] = run (4);
+    check (l5b == 0.0f, "fader all the way down");
+    check (engine.takeStripPeak (0) > 0.2f, "the meter still shows the level with the fader down");
+    engine.strip (0).faderDb = faderWas;
+
     engine.strip (0).faderDb = 10.0f;
     engine.strip (0).trimDb = 20.0f;
     auto [l6, r6] = run (8);
