@@ -70,7 +70,7 @@ public:
     int numOutputs() const { return outputCount.load(); }
     double outputLatencyMs() const;
 
-    // Post-fader level of a strip, and the master output (after the limiter),
+    // Pre-fader level of a strip (after gain and plugins), and the master output (after the limiter),
     // since the last call; then resets.
     float takeStripPeak (int channel);
     float takeMasterPeak (int side);

@@ -95,7 +95,6 @@ export class LiveMixer {
       meter.fftSize = 512;
       split.connect(trim, i);
       fader.connect(pan).connect(this.bus);
-      fader.connect(meter);
       const chain = { trim, fader, pan, meter, inserts: [] };
       chain.inserts = this.params[i].plugins.map((pl) => this.instantiate(pl, i));
       return chain;
@@ -129,7 +128,7 @@ export class LiveMixer {
     c.pan.pan.setTargetAtTime(p.pan, t, 0.01);
   }
 
-  // Post-fader peak of a channel (0..1+).
+  // Pre-fader peak of a channel, after gain and plugins (0..1+).
   peak(i) {
     const c = this.chains[i];
     if (!c) return 0;
@@ -166,6 +165,8 @@ export class LiveMixer {
       node = c.inserts[k].output;
     });
     node.connect(c.fader);
+    // Pre-fader meter: it keeps showing the level when the fader is down or muted.
+    node.connect(c.meter);
   }
 
   addPlugin(i, type, url) {
