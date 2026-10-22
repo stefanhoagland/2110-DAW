@@ -358,7 +358,7 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
     storeMax (masterPeaks[0], bus.getMagnitude (0, 0, numSamples));
     storeMax (masterPeaks[1], bus.getMagnitude (1, 0, numSamples));
 
-    // Output patch. The mix only goes out while live; direct track signals always do.
+    // Output patch. The mix goes out unless muted (only when the app closes); direct track signals always do.
     const bool live = liveOn.load (std::memory_order_relaxed);
     const int outs = jmin (outputCount.load (std::memory_order_relaxed), maxChannels);
     for (int o = 0; o < outs; ++o)
