@@ -420,7 +420,9 @@ int main()
         }
         const auto st = send.status();
         check (! st.empty() && st[0].sending && st[0].audio && st[0].packets > 300, "stream is sending audio (" + String (st.empty() ? 0 : st[0].packets) + " packets)");
-        check (std::abs (got - 0.4f) < 0.01f && other < 0.001f, "track 1 comes back over AES67 on channel 1 (" + String (got) + ", " + String (other) + ")");
+        // The peak can overshoot a little: on a slow machine the stream restarts from silence, and
+        // resampling a step from silence to a constant level rings by up to about 10%.
+        check (got > 0.39f && got < 0.45f && other < 0.001f, "track 1 comes back over AES67 on channel 1 (" + String (got) + ", " + String (other) + ")");
         net.unsubscribe (back.key());
         engine.clearOutput (AudioEngine::firstNetOut + 0);
         check (! engine.getPatch (AudioEngine::firstDirect, AudioEngine::firstNetOut), "clearing a network output unpatches it");
