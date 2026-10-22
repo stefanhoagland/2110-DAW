@@ -104,7 +104,7 @@ void PatchGrid::paint (Graphics& g)
     {
         Rectangle<int> b (s.x, colHeader + r * cell, rowHeader, cell);
         if (r == hover.y) { g.setColour (theme::panel2); g.fillRect (b); }
-        g.setColour (r == hover.y ? theme::text : theme::textMuted);
+        g.setColour (rowColour != nullptr ? rowColour (r) : (r == hover.y ? theme::text : theme::textMuted));
         g.drawText (rowName (r), b.reduced (10, 0), Justification::centredLeft, true);
     }
 
@@ -218,6 +218,12 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
         if (r < busRows) return engine.busFullName (false, r - mainRows);
         const int t = r - busRows;
         return "Track " + String (t + 1) + " direct  " + trackName (t);
+    };
+    outGrid.rowColour = [this] (int r)
+    {
+        if (r < mainRows) return theme::mainBus;
+        if (r < busRows) return theme::auxBus;
+        return theme::textMuted;
     };
     outGrid.colName = [this, output] (int c)
     {

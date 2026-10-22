@@ -148,7 +148,7 @@ void SendKnob::paint (Graphics& g)
     if (on)
     {
         value.addCentredArc (k.getCentreX(), k.getCentreY(), rad, rad, 0.0f, start, start + pos * (end - start), true);
-        g.setColour (preFader ? theme::accent : theme::solo);
+        g.setColour (preFader ? theme::auxBus : theme::auxBus.darker (0.35f));
         g.strokePath (value, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
     }
     g.setColour (on ? theme::text : theme::textMuted);
@@ -221,8 +221,8 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
         auto* b = mains.add (new TextButton (String (m + 1)));
         WebLook::setStyle (*b, "small");
         b->setClickingTogglesState (true);
-        b->setColour (TextButton::buttonOnColourId, theme::accent);
-        b->setColour (TextButton::textColourOnId, theme::accentText);
+        b->setColour (TextButton::buttonOnColourId, theme::mainBus);
+        b->setColour (TextButton::textColourOnId, Colours::white);
         b->onClick = [this, m]
         {
             engine.strip (index).toMain[(size_t) m] = mains[m]->getToggleState();
@@ -251,7 +251,7 @@ ChannelStrip::ChannelStrip (AudioEngine& e, PluginHost& h, int ch) : engine (e),
     }
     WebLook::setStyle (pre, "small");
     pre.setClickingTogglesState (true);
-    pre.setColour (TextButton::buttonOnColourId, theme::solo);
+    pre.setColour (TextButton::buttonOnColourId, theme::auxBus);
     pre.setColour (TextButton::textColourOnId, Colour (0xff111111));
     pre.setTooltip ("Pre fader: the send ignores the channel fader (usual for monitor mixes). Off: it follows the fader.");
     pre.onClick = [this]
@@ -444,7 +444,7 @@ void ChannelStrip::paint (Graphics& g)
     auto r = getLocalBounds().toFloat().reduced (0.5f);
     g.setColour (theme::panel);
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (sendsAux >= 0 ? theme::solo : theme::line);
+    g.setColour (sendsAux >= 0 ? theme::auxBus : theme::line);
     g.drawRoundedRectangle (r, 6.0f, sendsAux >= 0 ? 1.5f : 1.0f);
 
     // dB marks beside the fader, lined up with the cap's centre line.
@@ -480,7 +480,7 @@ static void paintFaderScale (Graphics& g, const Slider& fader, Rectangle<int> sc
 
 BusStrip::BusStrip (AudioEngine& e, bool main, int i) : engine (e), isMain (main), index (i)
 {
-    smallLabel (name, {}, Justification::centredLeft, theme::text);
+    smallLabel (name, {}, Justification::centredLeft, isMain ? theme::mainBus : theme::auxBus);
     name.setFont (FontOptions (13.0f, Font::bold));
     name.setInterceptsMouseClicks (true, false);
     name.setEditable (false, true, false);
@@ -576,8 +576,12 @@ void BusStrip::paint (Graphics& g)
     auto r = getLocalBounds().toFloat().reduced (0.5f);
     g.setColour (theme::panel);
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (isMain ? theme::accent.withAlpha (0.6f) : theme::line);
+    const auto c = isMain ? theme::mainBus : theme::auxBus;
+    g.setColour (c.withAlpha (0.7f));
     g.drawRoundedRectangle (r, 6.0f, 1.0f);
+    // A coloured band along the top: red for mains, green for auxes.
+    g.setColour (c);
+    g.fillRoundedRectangle (r.withHeight (4.0f).reduced (6.0f, 0.0f).translated (0.0f, 1.0f), 2.0f);
     paintFaderScale (g, fader, scaleArea);
 }
 
@@ -592,6 +596,8 @@ BusNamesView::BusNamesView (AudioEngine& e) : engine (e)
     }
     auxTitle.setText ("Auxes", dontSendNotification);
     mainTitle.setText ("Mains", dontSendNotification);
+    auxTitle.setColour (Label::textColourId, theme::auxBus);
+    mainTitle.setColour (Label::textColourId, theme::mainBus);
     help.setText ("Type a name for any bus. It shows on the bus faders, the Faders menu and in Patch. Leave it empty for the plain number.",
                   dontSendNotification);
     help.setFont (FontOptions (13.0f));
