@@ -6,6 +6,8 @@ import { LiveMixer, faderToDb, fmtDb, pluginName, defaults as stripDefaults } fr
 import { loadWamModule, knownWams, rememberWam, serverWams, bundledWams } from './wam.js';
 import { PLUGINS, PLUGIN_ORDER, formatParam } from './plugins.js';
 import { TimecodeSource } from './timecode-source.js';
+import { NetworkAudio } from './aes67.js';
+import { bindNetworkPanel } from './aes67-panel.js';
 
 const PEAK_STEP = 1024; // samples per waveform peak
 const ROW_H = 64;
@@ -15,6 +17,8 @@ const STORE_KEY = 'daw2110.tracks';
 const $ = (id) => document.getElementById(id);
 const engine = new AudioEngine();
 const tc = new TimecodeSource(engine);
+const net = new NetworkAudio(MAX_CHANNELS); // AES67 streams, received by the container
+const AUTO_NAMES_KEY = 'daw2110.autonames';
 
 const state = {
   open: false,
@@ -135,7 +139,8 @@ function refreshTrack(t) {
   t.el.querySelector('.mute').classList.toggle('on', t.mute);
   t.el.querySelector('.solo').classList.toggle('on', t.solo);
   t.el.classList.toggle('no-input', !t.hasInput);
-  t.el.title = t.hasInput ? '' : 'This input device has no channel for this track';
+  const fed = net.trackName(t.index);
+  t.el.title = !t.hasInput ? 'This input device has no channel for this track' : fed ? `AES67: ${fed}` : '';
   state.dirty = true;
 }
 
@@ -336,13 +341,9 @@ async function openDevice() {
     const info = await engine.open({ deviceId: $('sel-input').value, sampleRate: rate });
     state.open = true;
     engine.master.gain.value = +$('master-vol').value; // keep master level across device changes
-    $('device-info').textContent = `${info.channels} ch · ${(info.sampleRate / 1000).toFixed(1)} kHz` +
-      (info.channels < MAX_CHANNELS ? ` · tracks ${info.channels + 1}–${MAX_CHANNELS} have no input` : '');
-    tracks.forEach((t) => (t.hasInput = t.index < info.channels));
-    refreshAll();
-    tracks.forEach((t) => t.strip.classList.toggle('no-input', !t.hasInput));
+    updateInputs();
     $('live-latency').textContent = engine.latency ? `Latency ≈ ${Math.round(engine.latency * 1000)} ms` : '';
-    if (info.channels < MAX_CHANNELS) {
+    if (info.channels < MAX_CHANNELS && !net.subs.length) {
       notice(`This input gives the browser ${info.channels} channel${info.channels === 1 ? '' : 's'}, so tracks ${info.channels + 1}–${MAX_CHANNELS} will record silence. ` +
         `For all ${MAX_CHANNELS} channels, use Chrome with an interface that appears as one multichannel device (see README).`);
     } else {
@@ -355,6 +356,58 @@ async function openDevice() {
     state.open = false;
     notice(`Could not open that input: ${err.message}`, true);
   }
+}
+
+// Which tracks have something feeding them: the interface's channels, or a network stream.
+function updateInputs() {
+  let changed = false;
+  for (const t of tracks) {
+    const has = !state.open || t.index < engine.deviceChannels || !!net.sourceOf(t.index);
+    const title = net.trackName(t.index);
+    if (t.hasInput !== has || t.fedBy !== title) { t.hasInput = has; t.fedBy = title; changed = true; }
+  }
+  if (state.open) {
+    const netCh = tracks.filter((t) => net.sourceOf(t.index)).length;
+    const missing = tracks.filter((t) => !t.hasInput).length;
+    $('device-info').textContent = `${engine.deviceChannels} ch · ${(engine.sampleRate / 1000).toFixed(1)} kHz` +
+      (netCh ? ` · ${netCh} AES67` : '') + (missing ? ` · ${missing} track${missing === 1 ? ' has' : 's have'} no input` : '');
+    if (netCh && $('notice').textContent.startsWith('This input gives the browser')) notice('');
+  }
+  if (!changed) return;
+  refreshAll();
+  tracks.forEach((t) => t.strip.classList.toggle('no-input', !t.hasInput));
+}
+
+// Tracks fed by a network stream take its channel names ("Stage Box A 3"),
+// unless you've typed a name of your own.
+function applyAutoNames() {
+  let auto = [];
+  try { auto = JSON.parse(localStorage.getItem(AUTO_NAMES_KEY) || '[]'); } catch (_) { /* storage unavailable */ }
+  let changed = false;
+  for (const t of tracks) {
+    const want = net.trackName(t.index).slice(0, NAME_MAX);
+    const was = auto[t.index] || '';
+    if (want === was) continue;
+    const automatic = t.name === `Ch ${t.index + 1}` || (was && t.name === was);
+    if (automatic) {
+      t.name = want || `Ch ${t.index + 1}`;
+      t.el.querySelector('.name').value = t.name;
+    }
+    auto[t.index] = want;
+    changed = true;
+  }
+  if (!changed) return;
+  try { localStorage.setItem(AUTO_NAMES_KEY, JSON.stringify(auto)); } catch (_) { /* storage unavailable */ }
+  save();
+}
+
+function onNetworkChange() {
+  updateInputs();
+  applyAutoNames();
+  const n = net.subs.length;
+  const btn = $('btn-aes67');
+  const txt = n ? `AES67 · ${n} stream${n === 1 ? '' : 's'}` : 'AES67 network';
+  if (btn.textContent !== txt) btn.textContent = txt;
 }
 
 async function chooseFolder() {
@@ -1300,6 +1353,15 @@ function init() {
   bindLive();
   bindPluginPanel();
   setMode(loadMode());
+  engine.addEventListener('opened', () => net.attach(engine.input));
+  net.addEventListener('change', onNetworkChange);
+  bindNetworkPanel(net, {
+    numTracks: MAX_CHANNELS,
+    deviceChannels: () => (state.open ? engine.deviceChannels : 0),
+    audioInfo: () => (state.open ? `${$('sel-input').selectedOptions[0]?.textContent || 'input'} · ${$('device-info').textContent}` : 'audio not enabled'),
+  });
+  onNetworkChange();
+  if (net.subs.length) net.connect(); // otherwise when the AES67 window opens
   requestAnimationFrame(frame);
   Promise.all([bundledWams(), serverWams()]).then(([a, b]) => { state.serverWams = [...a, ...b]; if (state.serverWams.length) refreshAddMenus(); });
   setInterval(() => live.saveWamStates(), 5000); // third-party editors don't report changes
@@ -1313,4 +1375,4 @@ function init() {
 init();
 
 // Expose for debugging and automated tests.
-window.daw = { engine, state, tracks, live, tc };
+window.daw = { engine, state, tracks, live, tc, net };

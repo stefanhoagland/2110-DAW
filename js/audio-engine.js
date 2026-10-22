@@ -8,6 +8,7 @@ export class AudioEngine extends EventTarget {
     this.ctx = null;
     this.stream = null;
     this.source = null;
+    this.input = null; // all track inputs (interface + network)
     this.recorder = null;
     this.deviceChannels = 0;
     this.master = null;
@@ -42,6 +43,7 @@ export class AudioEngine extends EventTarget {
     this.ctx = new AudioContext(opts);
     await this.ctx.audioWorklet.addModule(new URL('./recorder-worklet.js', import.meta.url));
     await this.ctx.audioWorklet.addModule(new URL('./plugins-worklet.js', import.meta.url));
+    await this.ctx.audioWorklet.addModule(new URL('./aes67-worklet.js', import.meta.url));
 
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -57,6 +59,18 @@ export class AudioEngine extends EventTarget {
     this.deviceChannels = settings.channelCount || 2;
 
     this.source = this.ctx.createMediaStreamSource(this.stream);
+    // Every track's input: the interface's channels, with AES67 network streams
+    // on the tracks they're patched to (see aes67.js).
+    this.input = new AudioWorkletNode(this.ctx, 'aes67-input', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [MAX_CHANNELS],
+      channelCount: MAX_CHANNELS,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'discrete',
+      processorOptions: { channels: MAX_CHANNELS },
+    });
+    this.source.connect(this.input);
     this.recorder = new AudioWorkletNode(this.ctx, 'recorder-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -68,7 +82,7 @@ export class AudioEngine extends EventTarget {
     });
     this.recorder.port.onmessage = (e) => this.dispatchEvent(new CustomEvent(e.data.type, { detail: e.data }));
     this.recorder.port.postMessage({ cmd: 'ltc', channel: this.ltcChannel });
-    this.source.connect(this.recorder);
+    this.input.connect(this.recorder);
     this.recorder.connect(this.ctx.destination); // outputs silence; keeps the node running
 
     // Master bus: master gain -> (optional limiter) -> output, metered after the limiter.
@@ -103,7 +117,7 @@ export class AudioEngine extends EventTarget {
     this.stopPlayback();
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     if (this.ctx) await this.ctx.close();
-    this.ctx = this.stream = this.source = this.recorder = this.master = this.masterTaps = null;
+    this.ctx = this.stream = this.source = this.input = this.recorder = this.master = this.masterTaps = null;
     this.limiter = this.out = null;
   }
 

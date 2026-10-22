@@ -32,6 +32,20 @@ The top-bar clock then shows timecode (`HH:MM:SS:FF`, `;` before the frames for 
 
 When timecode is locked as a take starts, every WAV of that take is a **Broadcast Wave** file stamped with the timecode of its first sample (the `bext` time reference, plus `sTC=… fps=…` in the description), so Pro Tools, Reaper, Logic and similar can spot the files to their original timecode position. Without timecode the files are plain WAVs as before.
 
+### AES67 / ST 2110-30 network audio
+
+**AES67 network** (next to Timecode) receives AES67 and SMPTE ST 2110-30 streams onto tracks, with no driver or sound card, like the Mac app. It works when the app is opened from the Docker container (or `npm start`), because browsers can't join network audio themselves: the container joins the streams and passes the audio to the page.
+
+- Streams that announce themselves (SAP, which Dante in AES67 mode, Ravenna and most 2110 gear can do) appear in the list on their own. A stream that isn't announced can be added by pasting its SDP or loading an `.sdp` file.
+- Tick a stream to receive it and pick **Tracks from** to choose where its channels land. New streams go on the first free tracks after your interface's channels. A stream's audio replaces the interface's on those tracks, for recording and in Live.
+- Tracks take the stream's channel names (`Stage Box A 3`) unless you've typed your own name.
+- Uncompressed L16 and L24 at any rate (resampled to the browser's rate), up to 64 channels a stream; channels past track 32 are left out.
+- No PTP needed to receive: each stream is gently sped up or slowed down to follow the sender's clock. Streams aren't sample-aligned with each other or with the interface.
+- **Buffer** sets how much audio each stream keeps in hand (20 ms by default). The path through the browser is jumpier than the Mac app's, so after a dropout a stream adds 5 ms by itself (up to 200 ms more). **Copy report** copies each stream's health (packets, lost, dropouts, longest gap) for troubleshooting.
+- **Network port** picks which of the container's network ports joins the streams.
+
+The container has to be on the network the streams are on. Docker's default `bridge` network doesn't pass multicast, so on Unraid set the container's **Network Type** to a custom network on the media network's port (for example `br0` with a fixed IP), or use `host`. If streams come from another subnet, the network must route multicast to it (IGMP/PIM), as for any receiver.
+
 Keyboard: while typing a channel name, `Tab` or `Enter` jumps to the next channel's name (`Shift+Tab` goes back). `R` record, `Space` play/stop, `Home` or `Enter` return to zero, `Delete` remove the selected clip, `Esc` clear the selection.
 
 ## Live mode
@@ -78,6 +92,8 @@ The certificate is stored in `/mnt/user/appdata/2110-daw/certs`. To use a real c
 
 The audio still runs in your browser, on the computer the interface is plugged into; the server only hosts the app. Recordings save to that computer (or wherever the save folder points), not to the server.
 
+For AES67 network audio, the container must be on the streams' network (see [AES67](#aes67--st-2110-30-network-audio)): set **Network Type** to a custom network such as `br0` with its own IP, and then open `https://<container-ip>/` (no port number, since the container has its own address).
+
 Without the template, the equivalent command is:
 
 ```sh
@@ -97,8 +113,9 @@ Browsers see an audio interface the same way they see a microphone, and some dri
 ## Development
 
 ```sh
-npm test               # WAV/BWF encoding and timecode decoding unit tests (Node)
+npm test               # WAV/BWF, timecode and AES67 unit tests (Node)
 npm run test:browser   # records 2 seconds in headless Chromium with a fake mic (needs Playwright)
+node tests/aes67-browser.mjs  # two pretend AES67 streams on this machine, played on tracks in Chromium
 ```
 
 No build step: plain HTML, CSS and JavaScript modules.
@@ -112,6 +129,10 @@ No build step: plain HTML, CSS and JavaScript modules.
 | `js/wav.js` | WAV header (with optional BWF `bext` timecode stamp) and 24-bit encoding |
 | `js/timecode.js` | LTC decoder, frame-rate detection, MTC parser, timecode math (no browser APIs) |
 | `js/timecode-source.js` | Timecode setting, MIDI input, the running timecode for the clock and recordings |
+| `js/aes67.js`, `js/aes67-panel.js` | AES67 streams: connection to the receiver, track patching, the AES67 window |
+| `js/aes67-worklet.js` | Audio-thread processor: interface channels plus network streams, buffering and clock following |
+| `js/aes67-sdp.js` | SDP reading (shared by the page and the receiver) |
+| `server/aes67-server.mjs` | The receiver in the container: SAP discovery, joining streams, WebSocket to the page (Node, no dependencies) |
 
 ## Roadmap
 
