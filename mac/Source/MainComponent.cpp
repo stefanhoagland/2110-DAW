@@ -97,9 +97,12 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     timecodeButton.setTooltip ("External timecode: LTC on an input, or MIDI timecode. Takes are stamped with it.");
     timecodeButton.onClick = [this] { showTimecodeMenu(); };
     addAndMakeVisible (timecodeButton);
-    networkButton.setTooltip ("Receive AES67 / SMPTE ST 2110-30 audio streams from the network as extra inputs");
-    networkButton.onClick = [this] { showNetwork(); };
+    networkButton.setTooltip ("AES67 receivers: take AES67 / SMPTE ST 2110-30 streams from the network as extra inputs");
+    networkButton.onClick = [this] { showNetwork (0); };
     addAndMakeVisible (networkButton);
+    sendButton.setTooltip ("AES67 transmitters: create streams this Mac sends to the network, locked to PTP");
+    sendButton.onClick = [this] { showNetwork (1); };
+    addAndMakeVisible (sendButton);
     showButton.setTooltip ("Save or open a show: track names, patch, live mix, plugins and AES67 streams in one file (Cmd-S, Cmd-O)");
     showButton.onClick = [this] { showShowMenu(); };
     addAndMakeVisible (showButton);
@@ -163,6 +166,7 @@ MainComponent::~MainComponent()
     engine.network().onChange = nullptr;
     engine.sending().onChange = nullptr;
     if (networkWindow != nullptr) delete networkWindow.getComponent();
+    if (sendWindow != nullptr) delete sendWindow.getComponent();
     engine.devices().removeChangeListener (this);
     engine.setLive (false);
     engine.stopRecording();
@@ -262,6 +266,8 @@ void MainComponent::resized()
         timecodeButton.setBounds (b.removeFromLeft (jmin (widthOf (timecodeButton), 240)));
         b.removeFromLeft (10);
         networkButton.setBounds (b.removeFromLeft (widthOf (networkButton)));
+        b.removeFromLeft (10);
+        sendButton.setBounds (b.removeFromLeft (widthOf (sendButton)));
         b.removeFromLeft (10);
         // Usage sits left of the save folder; the folder path gives way to it first.
         const int usageW = GlyphArrangement::getStringWidthInt (FontOptions (13.0f), String (CharPointer_UTF8 ("Audio 100%  \xc2\xb7  CPU 100%  \xc2\xb7  Memory 99.9 GB"))) + 8;
@@ -540,8 +546,7 @@ void MainComponent::applyShow (const var& v)
     console.setNames (trackNames());
     console.refresh();
     patchView.refresh();
-    if (networkWindow != nullptr)
-        if (auto* nv = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) nv->refresh();
+    refreshNetworkWindows();
     refreshLabels();
     noteSources();
 }
@@ -912,31 +917,37 @@ void MainComponent::showTimecodeMenu()
 }
 
 //==============================================================================
-void MainComponent::showNetwork()
+void MainComponent::showNetwork (int page)
 {
-    if (networkWindow != nullptr) { networkWindow->toFront (true); return; }
+    auto& window = page == 1 ? sendWindow : networkWindow;
+    if (window != nullptr) { window->toFront (true); return; }
     DialogWindow::LaunchOptions o;
-    o.content.setOwned (new NetworkView (engine));
-    o.dialogTitle = "AES67 network audio";
+    o.content.setOwned (new NetworkView (engine, page));
+    o.dialogTitle = page == 1 ? "AES67 transmitters" : "AES67 receivers";
     o.dialogBackgroundColour = theme::panel;
     o.useNativeTitleBar = true;
     o.resizable = true;
-    networkWindow = o.launchAsync();
+    window = o.launchAsync();
+}
+
+void MainComponent::refreshNetworkWindows()
+{
+    for (auto* w : { networkWindow.getComponent(), sendWindow.getComponent() })
+        if (w != nullptr)
+            if (auto* v = dynamic_cast<NetworkView*> (w->getContentComponent())) v->refresh();
 }
 
 void MainComponent::sendingChanged()
 {
     settings.setValue ("aes67send", engine.sending().saveState());
-    if (networkWindow != nullptr)
-        if (auto* v = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) v->refresh();
+    refreshNetworkWindows();
     patchView.refresh();
 }
 
 void MainComponent::networkChanged()
 {
     settings.setValue ("aes67", engine.network().saveState());
-    if (networkWindow != nullptr)
-        if (auto* v = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) v->refresh();
+    refreshNetworkWindows();
     if (engine.isRecording()) return; // tracks change after the take
     followNetworkPatch();
     saveTracks();

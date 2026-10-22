@@ -275,7 +275,7 @@ void PatchView::showPage (int p)
     inView.setVisible (p == 0 && inputView == 1);
     outView.setVisible (p == 1);
     help.setText (p == 0 ? (inputView == 0 ? String() : "Pick which interface input feeds each track. Studio records and Live mixes the tracks.")
-                         : "Send the mains, the auxes or any track's input to interface outputs and AES67 streams (create streams in AES67 network > Send).",
+                         : "Send the mains, the auxes or any track's input to interface outputs and AES67 streams (create streams with Transmitters in the setup bar).",
                   dontSendNotification);
     refresh();
 }

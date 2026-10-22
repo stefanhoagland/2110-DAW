@@ -2,14 +2,15 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "AudioEngine.h"
 
-// The AES67 window: which network port to use, then two tabs.
-// Receive: the streams on the network (found by SAP) with a tick to receive each, their
+// The AES67 windows: which network port to use, then one of two pages.
+// Receivers: the streams on the network (found by SAP) with a tick to receive each, their
 // status, and a box to paste an SDP.
-// Send: the PTP clock, the streams this Mac sends, and a form to create one.
+// Transmitters: the PTP clock, the streams this Mac sends, and a form to create one.
 class NetworkView : public juce::Component, private juce::Timer
 {
 public:
-    explicit NetworkView (AudioEngine&);
+    // page 0: receivers, 1: transmitters
+    NetworkView (AudioEngine&, int page);
     void refresh(); // streams changed
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -52,8 +53,6 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 
     int tab = 0;
-    juce::TextButton receiveTab { "Receive" }, sendTab { "Send" };
-    juce::Rectangle<int> tabPill;
     juce::Label ptpState, domainLabel, sendLabel, sendHint, newLabel, nameLabel, chLabel, ptimeLabel, addrLabel, feedLabel;
     juce::ComboBox domain, channels, ptime, feed;
     juce::TextEditor nameEdit, addrEdit;
