@@ -348,7 +348,7 @@ void ConsoleView::setNames (const StringArray& names)
     for (auto* s : strips)
     {
         s->setName (names[s->channel()]);
-        s->setHasInput (s->channel() < engine.numInputs() && engine.getTrackSource (s->channel()) >= 0);
+        s->setHasInput (isPositiveAndBelow (engine.getTrackSource (s->channel()), engine.numInputs()));
     }
 }
 

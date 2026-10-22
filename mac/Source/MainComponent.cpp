@@ -8,7 +8,6 @@ using namespace juce;
 static const String sep = String (CharPointer_UTF8 ("  \xc2\xb7  "));
 static const String sep1 = String (CharPointer_UTF8 (" \xc2\xb7 "));
 
-static constexpr int defaultTracks = 32; // shown when no device is open
 
 // Width of a web-style button: text plus 10 px padding each side.
 static int widthOf (TextButton& b)
@@ -303,7 +302,7 @@ void MainComponent::resized()
 
 void MainComponent::rebuildTracks()
 {
-    const int n = engine.numInputs() > 0 ? engine.numInputs() : defaultTracks;
+    const int n = AudioEngine::numTracks;
     if (n == rows.size())
         return;
 
@@ -384,6 +383,12 @@ void MainComponent::followNetworkPatch()
         if (patchIds[t].isNotEmpty()) engine.setTrackSource (t, PatchView::networkInput (engine, patchIds[t]));
     rememberPatch();
     savePatch();
+}
+
+bool MainComponent::hasSource (int track) const
+{
+    const int src = engine.getTrackSource (track);
+    return src >= 0 && src < engine.numInputs();
 }
 
 void MainComponent::noteSources()
@@ -667,8 +672,9 @@ void MainComponent::startRecording()
 {
     std::vector<AudioEngine::Track> armed;
     for (auto* r : rows)
-        if (r->isArmed() && r->channel() < engine.numInputs())
+        if (r->isArmed() && hasSource (r->channel())) // armed tracks with something patched
             armed.push_back ({ r->channel(), r->getName() });
+    if (armed.empty()) { setStatus ("Nothing to record: arm a track that has an input patched to it.", true); return; }
 
     const int next = nextTakeNumber();
     auto err = engine.startRecording (folder, next, armed);
@@ -676,7 +682,7 @@ void MainComponent::startRecording()
 
     take = next;
     for (auto* r : rows) r->setLocked (true);
-    for (auto* r : rows) if (r->isArmed()) r->startWave(); else r->clearWave();
+    for (auto* r : rows) if (r->isArmed() && hasSource (r->channel())) r->startWave(); else r->clearWave();
     audioButton.setEnabled (false);
     folderButton.setEnabled (false);
     recordButton.setToggleState (true, dontSendNotification);
@@ -742,7 +748,7 @@ void MainComponent::timerCallback()
 {
     const bool rec = engine.isRecording();
     // Network streams added during a take become tracks once it ends.
-    if (! rec && engine.numInputs() > 0 && engine.numInputs() != rows.size()) networkChanged();
+    if (! rec && engine.numInputs() != lastInputs) { lastInputs = engine.numInputs(); networkChanged(); }
     const double secs = rec ? engine.recordedSeconds() : lastTakeSeconds;
     for (auto* r : rows)
     {

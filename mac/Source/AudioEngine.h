@@ -14,6 +14,7 @@ class AudioEngine : public juce::AudioIODeviceCallback,
 {
 public:
     static constexpr int maxChannels = 256;
+    static constexpr int numTracks = 128; // always this many tracks and strips, patched or not
 
     AudioEngine();
     ~AudioEngine() override;

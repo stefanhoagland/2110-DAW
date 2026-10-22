@@ -176,7 +176,7 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
 
     // Inputs: one source per track (picking a new one moves the dot).
     inGrid.numRows = [this] { return engine.numInputs(); };
-    inGrid.numCols = [this] { return engine.numInputs(); };
+    inGrid.numCols = [] { return AudioEngine::numTracks; };
     inGrid.rowName = [this] (int r) { return inputName (r); };
     inGrid.colName = [this] (int c) { return String (c + 1) + "  " + trackName (c); };
     inGrid.isOn = [this] (int r, int c) { return engine.getTrackSource (c) == r; };
@@ -189,7 +189,7 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
     inGrid.corner = String (CharPointer_UTF8 ("Interface inputs \xe2\x86\x93\nTracks \xe2\x86\x92"));
 
     // Outputs: any source to any output; several sources on one output are mixed.
-    outGrid.numRows = [this] { return 2 + engine.numInputs(); };
+    outGrid.numRows = [] { return 2 + AudioEngine::numTracks; };
     outGrid.numCols = [this] { return engine.numOutputs(); };
     outGrid.rowName = [this] (int r)
     {

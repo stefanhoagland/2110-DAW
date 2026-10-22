@@ -48,6 +48,8 @@ private:
     juce::StringArray patchIds; // per track: PatchView::networkId of its source, or empty
     void namesFollowPatch();    // tracks just patched or unpatched take their source's name
     void noteSources();
+    bool hasSource (int track) const;
+    int lastInputs = -1;
     std::vector<int> lastSources;
     // Show files: the tracks, patch, live mix, plugins and AES67 streams in one file.
     void showShowMenu();

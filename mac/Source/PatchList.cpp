@@ -50,7 +50,7 @@ public:
         Tracks& tracks;
     };
 
-    int getNumRows() override { return owner.engine.numInputs(); }
+    int getNumRows() override { return AudioEngine::numTracks; }
 
     void paintListBoxItem (int row, Graphics& g, int w, int h, bool rowSelected) override
     {
@@ -372,7 +372,7 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
     // channels: the extra tracks it brings are left empty, ready to patch.
     for (auto& s : status)
         if (started.contains (s.info.key()))
-            for (int track = 0; track < engine.numInputs(); ++track)
+            for (int track = 0; track < AudioEngine::numTracks; ++track)
             {
                 const int src = engine.getTrackSource (track);
                 if (src >= dev + s.firstChannel && src < dev + s.firstChannel + s.info.channels)
@@ -393,14 +393,14 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
                 if (s.info.key() == key) input = dev + s.firstChannel + ch;
         }
         if (input < 0 || input >= engine.numInputs()) continue;
-        if (t >= engine.numInputs()) break;
+        if (t >= AudioEngine::numTracks) break;
         touched.add (t);
         engine.setTrackSource (t++, input);
         ++placed;
     }
     const int missed = sources.size() - placed;
     message.setText (missed > 0 ? String (missed) + " channel" + (missed == 1 ? " didn't" : "s didn't") + " fit: there are only "
-                                  + String (engine.numInputs()) + " tracks."
+                                  + String (AudioEngine::numTracks) + " tracks."
                                 : String(),
                      dontSendNotification);
     if (onChange) onChange();

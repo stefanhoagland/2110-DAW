@@ -213,11 +213,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         netCh = 0;
 
     // Patch: find each track's input.
-    const int tracks = devIns + netCh;
+    const int tracks = numTracks;
     for (int t = 0; t < tracks; ++t)
     {
         const int src = trackSource[(size_t) t].load (std::memory_order_relaxed);
-        if (src >= devIns && src < tracks)
+        if (src >= devIns && src < devIns + netCh)
         {
             trackIn[(size_t) t] = netBuf.getReadPointer (src - devIns);
             continue;
