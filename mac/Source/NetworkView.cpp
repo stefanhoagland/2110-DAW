@@ -204,7 +204,7 @@ void NetworkView::refresh()
 String NetworkView::tracksFedBy (int firstInput, int channels) const
 {
     Array<int> fed;
-    for (int t = 0; t < engine.numInputs(); ++t)
+    for (int t = 0; t < AudioEngine::numTracks; ++t)
     {
         const int src = engine.getTrackSource (t);
         if (src >= firstInput && src < firstInput + channels) fed.add (t + 1);

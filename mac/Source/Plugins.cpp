@@ -224,6 +224,22 @@ void PluginHost::save()
     settings.setValue ("inserts", saveInserts());
 }
 
+void PluginHost::clearAll()
+{
+    loadNext = nullptr; // stop a load still in progress
+    for (int t = 0; t < AudioEngine::maxChannels; ++t)
+    {
+        auto list = engine.getInserts (t);
+        if (list.empty()) continue;
+        for (int i = (int) list.size(); --i >= 0;)
+        {
+            closeEditorFor (list[(size_t) i]->plugin.get());
+            engine.removeInsert (t, i);
+        }
+        changed (t);
+    }
+}
+
 void PluginHost::loadInserts (const String& json)
 {
     // Load one plugin at a time so each track's chain comes back in the saved order.

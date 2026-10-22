@@ -14,6 +14,7 @@ class AudioEngine : public juce::AudioIODeviceCallback,
 {
 public:
     static constexpr int maxChannels = 256;
+    static constexpr int numTracks = 128; // always this many tracks and strips, patched or not
 
     AudioEngine();
     ~AudioEngine() override;
@@ -169,7 +170,7 @@ private:
     std::array<std::atomic<float>, maxChannels> stripPeaks {};
     std::array<std::atomic<float>, 2> masterPeaks {};
     std::array<float, maxChannels> lastL {}, lastR {}; // gains used last block, for smooth changes
-    std::atomic<bool> liveOn { false }, limiterOn { true };
+    std::atomic<bool> liveOn { true }, limiterOn { true };
     std::atomic<float> masterDb { 0.0f };
     std::atomic<int> outputCount { 0 };
     float lastMaster = 0.0f, limiterEnv = 0.0f, limiterRelease = 0.0f;

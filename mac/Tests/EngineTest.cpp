@@ -142,8 +142,8 @@ int main()
     };
     for (int c = 1; c < 64; ++c) engine.strip (c).faderDb = -60.0f; // only channel 1 up
     auto [l0, r0] = run (4);
-    check (l0 == 0.0f && r0 == 0.0f, "silent until Go live");
-    check (engine.takeStripPeak (0) > 0.49f, "strip meter runs before going live");
+    check (l0 > 0.3f && r0 > 0.3f, "the mix goes out without pressing anything (" + String (l0) + ")");
+    check (engine.takeStripPeak (0) > 0.49f, "strip meter runs");
 
     engine.setLive (true);
     auto [l1, r1] = run (4);

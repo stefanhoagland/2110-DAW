@@ -51,6 +51,7 @@ public:
 
     void refresh();
     std::function<void()> onChange;
+    juce::Array<int> takeTouched() { auto t = list.touched; list.touched.clear(); return t; } // tracks patched in the list
 
     // How the input patch is shown: 0 = list (Dante style), 1 = XY grid.
     int getInputView() const { return inputView; }

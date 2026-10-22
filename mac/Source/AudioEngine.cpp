@@ -213,11 +213,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         netCh = 0;
 
     // Patch: find each track's input.
-    const int tracks = devIns + netCh;
+    const int tracks = numTracks;
     for (int t = 0; t < tracks; ++t)
     {
         const int src = trackSource[(size_t) t].load (std::memory_order_relaxed);
-        if (src >= devIns && src < tracks)
+        if (src >= devIns && src < devIns + netCh)
         {
             trackIn[(size_t) t] = netBuf.getReadPointer (src - devIns);
             continue;
@@ -358,7 +358,7 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
     storeMax (masterPeaks[0], bus.getMagnitude (0, 0, numSamples));
     storeMax (masterPeaks[1], bus.getMagnitude (1, 0, numSamples));
 
-    // Output patch. The mix only goes out while live; direct track signals always do.
+    // Output patch. The mix goes out unless muted (only when the app closes); direct track signals always do.
     const bool live = liveOn.load (std::memory_order_relaxed);
     const int outs = jmin (outputCount.load (std::memory_order_relaxed), maxChannels);
     for (int o = 0; o < outs; ++o)

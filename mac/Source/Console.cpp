@@ -303,7 +303,7 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
         if (onGoLive) onGoLive (on);
     };
     WebLook::setStyle (goLive, "bold");
-    addAndMakeVisible (goLive);
+    // The mix always reaches the outputs, so there's no Go live button or status to show.
 
     limiter.setToggleState (engine.limiterEnabled(), dontSendNotification);
     limiter.setColour (ToggleButton::textColourId, theme::text);
@@ -317,6 +317,7 @@ ConsoleView::ConsoleView (AudioEngine& e, PluginHost& h) : engine (e), host (h)
         l->setColour (Label::textColourId, theme::textMuted);
         addAndMakeVisible (*l);
     }
+    status.setVisible (false);
     hint.setText ("Double-click a control to reset it", dontSendNotification);
     hint.setJustificationType (Justification::centredRight);
 
@@ -347,7 +348,7 @@ void ConsoleView::setNames (const StringArray& names)
     for (auto* s : strips)
     {
         s->setName (names[s->channel()]);
-        s->setHasInput (s->channel() < engine.numInputs() && engine.getTrackSource (s->channel()) >= 0);
+        s->setHasInput (isPositiveAndBelow (engine.getTrackSource (s->channel()), engine.numInputs()));
     }
 }
 
@@ -395,10 +396,6 @@ void ConsoleView::resized()
     auto width = [] (const String& t, bool bold = false)
     { return GlyphArrangement::getStringWidthInt (FontOptions (13.0f, bold ? Font::bold : Font::plain), t); };
 
-    goLive.setBounds (bar.removeFromLeft (width ("Stop live", true) + 34));
-    bar.removeFromLeft (12);
-    status.setBounds (bar.removeFromLeft (width ("Live mix is off") + 10));
-    bar.removeFromLeft (12);
     output.setBounds (bar.removeFromLeft (jmin (bar.getWidth() / 2, width (output.getText()) + 10)));
     bar.removeFromLeft (12);
     limiter.setBounds (bar.removeFromLeft (width ("Master limiter") + 30));

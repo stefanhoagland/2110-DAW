@@ -15,6 +15,7 @@ public:
 
     void refresh();
     std::function<void()> onChange;
+    juce::Array<int> touched; // tracks the last patch or unpatch set (read in onChange)
 
     void resized() override;
     void paint (juce::Graphics&) override;
