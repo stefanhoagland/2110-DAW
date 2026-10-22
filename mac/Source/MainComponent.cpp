@@ -57,7 +57,10 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     patchTab.setTooltip ("Patch interface inputs to tracks, and sources to interface outputs");
 
     addChildComponent (patchView);
-    patchView.onChange = [this] { savePatch(); applyAutoNames(); console.refresh(); console.setNames (trackNames()); };
+    patchView.onChange = [this] { rememberPatch(); savePatch(); applyAutoNames(); console.refresh(); console.setNames (trackNames()); };
+    patchView.setInputView (settings.getValue ("patchView") == "grid" ? 1 : 0);
+    patchView.onViewChange = [this] { settings.setValue ("patchView", patchView.getInputView() == 1 ? "grid" : "list"); };
+    patchIds.addLines (settings.getValue ("patchNet"));
     PatchView::loadInputs (engine, settings.getValue ("patchIn"));
     PatchView::loadOutputs (engine, settings.getValue ("patchOut"));
 
@@ -343,6 +346,24 @@ void MainComponent::savePatch()
 {
     settings.setValue ("patchIn", PatchView::saveInputs (engine));
     settings.setValue ("patchOut", PatchView::saveOutputs (engine));
+    settings.setValue ("patchNet", patchIds.joinIntoString ("\n"));
+}
+
+void MainComponent::rememberPatch()
+{
+    patchIds.clear();
+    for (int t = 0; t < AudioEngine::maxChannels; ++t) patchIds.add (PatchView::networkId (engine, engine.getTrackSource (t)));
+    while (patchIds.size() > 0 && patchIds[patchIds.size() - 1].isEmpty()) patchIds.remove (patchIds.size() - 1);
+}
+
+void MainComponent::followNetworkPatch()
+{
+    // A track fed by a network channel keeps that channel when other streams come and
+    // go; if its stream is no longer received, the track is left unpatched.
+    for (int t = 0; t < patchIds.size(); ++t)
+        if (patchIds[t].isNotEmpty()) engine.setTrackSource (t, PatchView::networkInput (engine, patchIds[t]));
+    rememberPatch();
+    savePatch();
 }
 
 void MainComponent::saveLive()
@@ -378,6 +399,7 @@ void MainComponent::changeListenerCallback (ChangeBroadcaster*)
 {
     // Device changed in Audio settings.
     saveDevice();
+    followNetworkPatch();
     rebuildTracks();
     if (tcSetting.startsWith ("ltc")) applyTimecode (tcSetting, false); // new device: new input names
     console.setNames (trackNames());
@@ -706,6 +728,7 @@ void MainComponent::networkChanged()
     if (networkWindow != nullptr)
         if (auto* v = dynamic_cast<NetworkView*> (networkWindow->getContentComponent())) v->refresh();
     if (engine.isRecording()) return; // tracks change after the take
+    followNetworkPatch();
     saveTracks();
     rebuildTracks();
     applyAutoNames();

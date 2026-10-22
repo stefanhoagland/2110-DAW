@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "AudioEngine.h"
+#include "PatchList.h"
 
 // An XY crosspoint grid: sources down the left, destinations across the top,
 // a dot where they're connected. Click a cell to connect or disconnect;
@@ -51,11 +52,22 @@ public:
     void refresh();
     std::function<void()> onChange;
 
+    // How the input patch is shown: 0 = list (Dante style), 1 = XY grid.
+    int getInputView() const { return inputView; }
+    void setInputView (int);
+    std::function<void()> onViewChange;
+
     // Settings text for the two patches, and back.
     static juce::String saveInputs (const AudioEngine&);
     static juce::String saveOutputs (const AudioEngine&);
     static void loadInputs (AudioEngine&, const juce::String&);
     static void loadOutputs (AudioEngine&, const juce::String&);
+
+    // A network input as "net:<stream key>#<channel>" (empty for interface inputs), and
+    // back to its current input number (-1 if that stream isn't received). Network inputs
+    // move when streams are added or removed, so the patch follows them by these names.
+    static juce::String networkId (const AudioEngine&, int input);
+    static int networkInput (const AudioEngine&, const juce::String& id);
 
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -68,10 +80,12 @@ private:
     AudioEngine& engine;
     std::function<juce::String (int)> trackName;
     juce::TextButton inputsTab { "Inputs to tracks" }, outputsTab { "Outputs" },
-                     oneToOne { "Reset to 1:1" }, clearAll { "Clear all" };
+                     oneToOne { "Reset to 1:1" }, clearAll { "Clear all" },
+                     listButton { "List" }, gridButton { "Grid" };
     juce::Label help;
     PatchGrid inGrid, outGrid;
     PatchViewport inView, outView;
-    juce::Rectangle<int> pill;
-    int page = 0;
+    PatchListView list;
+    juce::Rectangle<int> pill, viewPill;
+    int page = 0, inputView = 0;
 };

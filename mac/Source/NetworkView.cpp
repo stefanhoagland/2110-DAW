@@ -32,8 +32,8 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
     streamsLabel.setText ("Streams on the network", dontSendNotification);
     streamsLabel.setColour (Label::textColourId, theme::text);
     sdpLabel.setText ("A stream that isn't listed? Paste its SDP here, or load the .sdp file:", dontSendNotification);
-    hint.setText ("Tick a stream to receive it. Its channels become tracks after your interface's inputs, "
-                  "and show up in the Patch tab. The app follows each stream's clock, so it works without PTP. "
+    hint.setText ("Tick a stream to receive it (or drag its channels onto tracks in the Patch tab). "
+                  "New streams land on the tracks after your interface's inputs until you patch them. The app follows each stream's clock, so it works without PTP. "
                   "Uncompressed L16/L24 streams (AES67, SMPTE ST 2110-30) are supported.", dontSendNotification);
     hint.setJustificationType (Justification::topLeft);
     error.setColour (Label::textColourId, Colour (0xffffd98a));
@@ -200,6 +200,27 @@ void NetworkView::refresh()
     resized();
 }
 
+// Which tracks this stream's channels are patched to, like "Tracks 3-4, 9-10".
+String NetworkView::tracksFedBy (int firstInput, int channels) const
+{
+    Array<int> fed;
+    for (int t = 0; t < engine.numInputs(); ++t)
+    {
+        const int src = engine.getTrackSource (t);
+        if (src >= firstInput && src < firstInput + channels) fed.add (t + 1);
+    }
+    if (fed.isEmpty()) return "not patched to a track";
+    StringArray runs;
+    for (int i = 0; i < fed.size();)
+    {
+        int j = i;
+        while (j + 1 < fed.size() && fed[j + 1] == fed[j] + 1) ++j;
+        runs.add (i == j ? String (fed[i]) : String (fed[i]) + "-" + String (fed[j]));
+        i = j + 1;
+    }
+    return (fed.size() == 1 ? "Track " : "Tracks ") + runs.joinIntoString (", ");
+}
+
 void NetworkView::updateStates()
 {
     auto status = engine.network().status();
@@ -212,8 +233,7 @@ void NetworkView::updateStates()
         Colour c = theme::textMuted;
         if (it != status.end())
         {
-            const int a = first + it->firstChannel + 1, b = a + it->info.channels - 1;
-            const String tracks = a == b ? "Track " + String (a) : "Tracks " + String (a) + "-" + String (b);
+            const String tracks = tracksFedBy (first + it->firstChannel, it->info.channels);
             text = (it->receiving ? "Receiving" : "Waiting for audio") + dot + tracks;
             if (it->lost > 0 || it->dropouts > 0)
                 text << dot << String (it->lost) << " lost packets, " << String (it->dropouts) << " dropouts";
