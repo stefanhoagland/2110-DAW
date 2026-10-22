@@ -11,6 +11,7 @@ class PatchGrid : public juce::Component
 public:
     std::function<int()> numRows, numCols;
     std::function<juce::String (int)> rowName, colName;
+    std::function<juce::Colour (int)> rowColour; // optional: text colour of a row's name
     std::function<bool (int row, int col)> isOn;
     std::function<void (int row, int col, bool on)> setOn;
     juce::String corner; // e.g. "Inputs ↓  Tracks →"
