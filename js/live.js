@@ -78,12 +78,12 @@ export class LiveMixer {
 
   // (Re)create the audio graph after the input device opens.
   build() {
-    const { ctx, source, master } = this.engine;
-    if (!ctx || !source) return;
+    const { ctx, input, master } = this.engine;
+    if (!ctx || !input) return;
     this.chains.forEach((c) => c.inserts.forEach((inst) => inst.dispose && inst.dispose()));
     const n = this.tracks.length;
     const split = ctx.createChannelSplitter(n);
-    source.connect(split);
+    input.connect(split);
     this.bus = ctx.createGain();
     this.bus.gain.value = this.on ? 1 : 0;
     this.bus.connect(master);

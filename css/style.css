@@ -395,3 +395,50 @@ label.check { cursor: pointer; }
 .plugin-panel.wide { width: auto; min-width: 320px; max-height: calc(100% - 32px); }
 .pp-gui { overflow: auto; max-width: calc(100vw - 64px); max-height: 65vh; background: #000; border-radius: 6px; }
 .pp-msg { margin: 0; font-size: 12px; }
+
+/* ---------- AES67 network audio ---------- */
+.aes67-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.aes67-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.aes-head, .aes-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.aes-head { margin-bottom: 6px; font-size: 15px; }
+.aes-row { margin: 8px 0; }
+.aes-row label { display: flex; align-items: center; gap: 6px; }
+.aes-state { margin: 4px 0 8px; color: var(--muted); }
+.aes-state.ok { color: var(--ok); }
+.aes-state.error { color: var(--mute); }
+.aes-list { border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: 45vh; }
+.aes-empty { padding: 14px; color: var(--muted); }
+.aes-stream {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.aes-stream:last-child { border-bottom: 0; }
+.aes-stream .aes-name { font-weight: 600; overflow-wrap: anywhere; }
+.aes-stream .aes-format, .aes-stream .aes-status { grid-column: 2 / 4; color: var(--muted); font-size: 12px; }
+.aes-stream .aes-status.ok { color: var(--ok); }
+.aes-stream .aes-status.bad { color: var(--mute); }
+.aes-stream label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.aes-sdp { margin-top: 10px; }
+.aes-sdp summary { cursor: pointer; color: var(--muted); }
+.aes-sdp textarea {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 12px ui-monospace, Menlo, monospace;
+}
+.aes-foot { font-size: 12px; margin: 10px 0 0; }

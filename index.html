@@ -64,6 +64,7 @@
         <option value="off">Off</option>
       </select>
     </label>
+    <button id="btn-aes67" title="Receive AES67 / SMPTE ST 2110-30 network audio onto tracks">AES67 network</button>
     <span class="spacer"></span>
     <button id="btn-folder">Choose save folder</button>
     <span id="folder-info" class="muted"></span>
@@ -124,6 +125,34 @@
       </div>
     </div>
   </section>
+
+  <dialog id="aes67-dialog" class="aes67-dialog">
+    <div class="aes-head">
+      <strong>AES67 network audio</strong>
+      <span class="spacer"></span>
+      <button id="aes-close" aria-label="Close">✕</button>
+    </div>
+    <p id="aes-state" class="aes-state"></p>
+    <div class="aes-row">
+      <label>Network port <select id="aes-iface"></select></label>
+      <label title="How much audio each stream keeps in hand. More rides out a jumpier network; less is quicker. It grows by itself after a dropout.">Buffer
+        <select id="aes-latency"></select></label>
+      <span class="spacer"></span>
+      <button id="aes-report" title="Copy a summary of every stream's health, to paste into a message">Copy report</button>
+    </div>
+    <div id="aes-list" class="aes-list"></div>
+    <details class="aes-sdp">
+      <summary>Add a stream from its SDP</summary>
+      <textarea id="aes-sdp-text" rows="6" placeholder="Paste the stream's SDP here (v=0 …)"></textarea>
+      <div class="aes-row">
+        <button id="aes-sdp-add">Add stream</button>
+        <button id="aes-sdp-file">Load SDP file…</button>
+        <input id="aes-sdp-input" type="file" accept=".sdp,.txt,application/sdp,text/plain" hidden>
+        <span id="aes-sdp-msg" class="muted"></span>
+      </div>
+    </details>
+    <p class="muted aes-foot">Streams are found automatically from SAP announcements. Each one plays on the tracks you pick, in place of the audio interface's channels there. The receiver runs in the Docker container, so the container needs to be on the network the streams are on.</p>
+  </dialog>
 
   <template id="strip-template">
     <div class="strip">
