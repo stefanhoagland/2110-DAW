@@ -91,3 +91,11 @@ export function parseSdpText(text) {
   if (r.ok) Object.assign(r.info, { key: streamKey(r.info), format: formatStream(r.info) });
   return r;
 }
+
+// True when every word of `query` is in the stream's name, address, sender or format.
+export function matchesSearch(info, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = `${info.name} ${info.address}:${info.port} ${info.origin} ${info.format || formatStream(info)}`.toLowerCase();
+  return words.every((w) => text.includes(w));
+}

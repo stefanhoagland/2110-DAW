@@ -6,6 +6,18 @@ using namespace juce;
 
 static const String dot = String (CharPointer_UTF8 (" \xc2\xb7 "));
 
+// True when every word of the search is in the stream's name, address, sender or format.
+static bool matchesSearch (const aes67::StreamInfo& s, const String& query)
+{
+    auto words = StringArray::fromTokens (query.trim(), " ", "");
+    words.removeEmptyStrings();
+    if (words.isEmpty()) return true;
+    const auto text = (s.name + " " + s.address + ":" + String (s.port) + " " + s.origin + " " + s.format()).toLowerCase();
+    for (auto& w : words)
+        if (! text.contains (w.toLowerCase())) return false;
+    return true;
+}
+
 NetworkView::NetworkView (AudioEngine& e) : engine (e)
 {
     auto& net = engine.network();
@@ -48,6 +60,14 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
     latency.setTooltip ("How much audio is held back to ride out network hiccups. Raise it if you hear dropouts.");
     latency.onChange = [this] { engine.network().setLatencyMs (latency.getSelectedId()); engine.network().onChange(); };
     addAndMakeVisible (latency);
+
+    search.setTextToShowWhenEmpty ("Search streams (name, address, sender)", theme::textMuted.withAlpha (0.7f));
+    search.setColour (TextEditor::backgroundColourId, theme::background);
+    search.setColour (TextEditor::outlineColourId, theme::line);
+    search.setFont (FontOptions (13.0f));
+    search.onTextChange = [this] { refresh(); };
+    search.onEscapeKey = [this] { search.clear(); refresh(); };
+    addAndMakeVisible (search);
 
     list.setOpaque (false);
     viewport.setViewedComponent (&list, false);
@@ -110,9 +130,22 @@ void NetworkView::refresh()
     auto& net = engine.network();
     // Streams being received first, then the rest of what's announced.
     std::vector<std::pair<aes67::StreamInfo, bool>> items;
-    for (auto& s : net.status()) items.push_back ({ s.info, true });
+    const auto query = search.getText();
+    int total = 0;
+    for (auto& s : net.status())
+    {
+        ++total;
+        if (matchesSearch (s.info, query)) items.push_back ({ s.info, true });
+    }
     for (auto& d : net.discovered())
-        if (! net.isSubscribed (d.key())) items.push_back ({ d, false });
+        if (! net.isSubscribed (d.key()))
+        {
+            ++total;
+            if (matchesSearch (d, query)) items.push_back ({ d, false });
+        }
+    streamsLabel.setText (query.trim().isEmpty() ? "Streams on the network"
+                                                 : "Streams on the network" + dot + String ((int) items.size()) + " of " + String (total),
+                          dontSendNotification);
 
     rows.clear();
     for (auto& [info, on] : items)
@@ -152,8 +185,10 @@ void NetworkView::refresh()
     if (rows.isEmpty())
     {
         auto* r = rows.add (new Row());
-        r->name.setText ("No streams found yet", dontSendNotification);
-        r->detail.setText ("Streams announced with SAP appear here within about 30 seconds. Check the network port above.",
+        const bool filtered = total > 0;
+        r->name.setText (filtered ? "No streams match \"" + query.trim() + "\"" : "No streams found yet", dontSendNotification);
+        r->detail.setText (filtered ? "Try part of the name, the address (239.69...) or the sender's IP. Esc clears the search."
+                                    : "Streams announced with SAP appear here within about 30 seconds. Check the network port above.",
                            dontSendNotification);
         r->detail.setFont (FontOptions (12.0f));
         r->detail.setColour (Label::textColourId, theme::textMuted);
@@ -221,7 +256,10 @@ void NetworkView::resized()
     latency.setBounds (top.removeFromLeft (90));
     r.removeFromTop (8);
     hint.setBounds (r.removeFromTop (48));
-    streamsLabel.setBounds (r.removeFromTop (24));
+    auto head = r.removeFromTop (26);
+    search.setBounds (head.removeFromRight (jmin (280, head.getWidth() / 2)).reduced (0, 1));
+    streamsLabel.setBounds (head);
+    r.removeFromTop (4);
 
     auto bottom = r.removeFromBottom (24);
     error.setBounds (bottom);

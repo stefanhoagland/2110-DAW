@@ -32,7 +32,7 @@ private:
     juce::OwnedArray<Row> rows;
     juce::Component list;
     juce::Viewport viewport;
-    juce::TextEditor sdpText;
+    juce::TextEditor sdpText, search;
     juce::TextButton addButton { "Add stream" }, loadButton { "Load SDP file..." }, reportButton { "Copy report" };
     std::unique_ptr<juce::FileChooser> chooser;
     std::vector<aes67::Interface> interfaces;
