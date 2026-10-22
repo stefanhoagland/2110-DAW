@@ -394,7 +394,10 @@ void MainComponent::saveTracks()
     for (auto* r : rows)
     {
         // An automatic name is stored as blank, so it can follow the track's source later.
-        all.set (r->channel(), r->getName() == autoName (r->channel()) ? String() : r->getName());
+        // The source may have just changed (a stream added or removed), so the name it
+        // had automatically until now counts as automatic too.
+        const int t = r->channel();
+        all.set (t, r->getName() == autoName (t) || r->getName() == lastAuto[t] ? String() : r->getName());
         armed = armed.replaceSection (r->channel(), 1, r->isArmed() ? "1" : "0");
     }
     settings.setValue ("names", all.joinIntoString ("\n"));
