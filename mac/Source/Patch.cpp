@@ -133,8 +133,21 @@ void PatchGrid::paint (Graphics& g)
 }
 
 //==============================================================================
-PatchView::PatchView (AudioEngine& e, std::function<String (int)> names) : engine (e), trackName (std::move (names))
+PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
+    : engine (e), trackName (std::move (names)), list (e, trackName)
 {
+    addChildComponent (list);
+    list.onChange = [this] { inGrid.refresh(); if (onChange) onChange(); };
+    for (auto* b : { &listButton, &gridButton })
+    {
+        WebLook::setStyle (*b, "mode");
+        addAndMakeVisible (*b);
+    }
+    listButton.setTooltip ("Tracks and available channels side by side, like Dante Controller");
+    gridButton.setTooltip ("XY crosspoint grid");
+    listButton.onClick = [this] { setInputView (0); if (onViewChange) onViewChange(); };
+    gridButton.onClick = [this] { setInputView (1); if (onViewChange) onViewChange(); };
+
     for (auto* t : { &inputsTab, &outputsTab })
     {
         WebLook::setStyle (*t, "mode");
@@ -218,14 +231,25 @@ String PatchView::outputName (int i) const
     return "Out " + String (i + 1) + (n.isNotEmpty() && n != String (i + 1) ? "  " + n : String());
 }
 
+void PatchView::setInputView (int v)
+{
+    inputView = v == 1 ? 1 : 0;
+    showPage (page);
+}
+
 void PatchView::showPage (int p)
 {
     page = p;
     inputsTab.setToggleState (p == 0, dontSendNotification);
     outputsTab.setToggleState (p == 1, dontSendNotification);
-    inView.setVisible (p == 0);
+    listButton.setToggleState (inputView == 0, dontSendNotification);
+    gridButton.setToggleState (inputView == 1, dontSendNotification);
+    listButton.setVisible (p == 0);
+    gridButton.setVisible (p == 0);
+    list.setVisible (p == 0 && inputView == 0);
+    inView.setVisible (p == 0 && inputView == 1);
     outView.setVisible (p == 1);
-    help.setText (p == 0 ? "Pick which interface input feeds each track. Studio records and Live mixes the tracks."
+    help.setText (p == 0 ? (inputView == 0 ? String() : "Pick which interface input feeds each track. Studio records and Live mixes the tracks.")
                          : "Send the live mix or any track's input straight to interface outputs. The live mix only plays while you're live.",
                   dontSendNotification);
     refresh();
@@ -233,6 +257,7 @@ void PatchView::showPage (int p)
 
 void PatchView::refresh()
 {
+    if (page == 0 && inputView == 0) list.refresh();
     inGrid.refresh();
     outGrid.refresh();
     resized();
@@ -250,6 +275,17 @@ void PatchView::resized()
     p.removeFromLeft (4);
     outputsTab.setBounds (p);
     bar.removeFromLeft (12);
+    if (page == 0)
+    {
+        const int vw = width (listButton) + width (gridButton) + 4 + 6;
+        viewPill = bar.removeFromLeft (vw).withSizeKeepingCentre (vw, 34);
+        auto v = viewPill.reduced (3);
+        listButton.setBounds (v.removeFromLeft (width (listButton)));
+        v.removeFromLeft (4);
+        gridButton.setBounds (v);
+        bar.removeFromLeft (12);
+    }
+    else viewPill = {};
     clearAll.setBounds (bar.removeFromRight (width (clearAll)).reduced (0, 2));
     bar.removeFromRight (10);
     oneToOne.setBounds (bar.removeFromRight (width (oneToOne)).reduced (0, 2));
@@ -257,6 +293,7 @@ void PatchView::resized()
     help.setBounds (bar);
     const bool empty = engine.numInputs() == 0 && engine.numOutputs() == 0;
     inView.setBounds (empty ? Rectangle<int>() : r);
+    list.setBounds (empty ? Rectangle<int>() : r);
     outView.setBounds (empty ? Rectangle<int>() : r);
     repaint();
 }
@@ -272,6 +309,7 @@ void PatchView::paint (Graphics& g)
     }
     g.setColour (theme::background);
     g.fillRoundedRectangle (pill.toFloat(), 8.0f);
+    if (! viewPill.isEmpty()) g.fillRoundedRectangle (viewPill.toFloat(), 8.0f);
     g.setColour (theme::line);
     g.fillRect (0, 45, getWidth(), 1);
 }
@@ -312,4 +350,25 @@ void PatchView::loadOutputs (AudioEngine& e, const String& text)
     for (auto& item : StringArray::fromTokens (text, ",", {}))
         e.setPatch (item.upToFirstOccurrenceOf (":", false, false).getIntValue(),
                     item.fromFirstOccurrenceOf (":", false, false).getIntValue(), true);
+}
+
+//==============================================================================
+String PatchView::networkId (const AudioEngine& e, int input)
+{
+    const int ch = input - e.numDeviceInputs();
+    if (ch < 0 || input >= e.numInputs()) return {};
+    for (auto& s : e.network().status())
+        if (ch >= s.firstChannel && ch < s.firstChannel + s.info.channels)
+            return "net:" + s.info.key() + "#" + String (ch - s.firstChannel);
+    return {};
+}
+
+int PatchView::networkInput (const AudioEngine& e, const String& id)
+{
+    if (! id.startsWith ("net:")) return -1;
+    const auto key = id.fromFirstOccurrenceOf ("net:", false, false).upToLastOccurrenceOf ("#", false, false);
+    const int ch = id.fromLastOccurrenceOf ("#", false, false).getIntValue();
+    for (auto& s : e.network().status())
+        if (s.info.key() == key && ch < s.info.channels) return e.numDeviceInputs() + s.firstChannel + ch;
+    return -1;
 }

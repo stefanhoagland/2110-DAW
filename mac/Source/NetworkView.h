@@ -23,6 +23,7 @@ private:
     };
     void timerCallback() override;
     void updateStates();
+    juce::String tracksFedBy (int firstInput, int channels) const;
     void showError (const juce::String&);
     void addFromText (const juce::String& sdp);
 

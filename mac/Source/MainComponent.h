@@ -42,6 +42,9 @@ private:
     enum Mode { studioMode, liveMode, patchMode };
     void setMode (Mode);
     void savePatch();
+    void rememberPatch();       // note which network channel feeds each track
+    void followNetworkPatch();  // re-point those tracks after streams or the device change
+    juce::StringArray patchIds; // per track: PatchView::networkId of its source, or empty
     void showTimecodeMenu();
     void showNetwork();
     void networkChanged();
