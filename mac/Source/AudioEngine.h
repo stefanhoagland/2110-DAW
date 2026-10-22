@@ -77,6 +77,11 @@ public:
     Bus& aux (int a) { return auxBuses[(size_t) juce::jlimit (0, numAux - 1, a)]; }
     Bus& mainBus (int m) { return mainBuses[(size_t) juce::jlimit (0, numMains - 1, m)]; }
     float takeAuxPeak (int a);
+    // Bus labels the user typed (message thread only). Empty means none.
+    void setBusLabel (bool main, int index, const juce::String& label);
+    juce::String busLabel (bool main, int index) const;
+    juce::String busName (bool main, int index) const;     // the label, or "Aux 3"
+    juce::String busFullName (bool main, int index) const; // "Aux 3: Wedges", or "Aux 3"
     float takeMainPeak (int m, int side);
 
     void setLive (bool on) { liveOn = on; }
@@ -190,6 +195,8 @@ private:
     std::array<Strip, maxChannels> strips;
     std::array<Bus, numAux> auxBuses;
     std::array<Bus, numMains> mainBuses;
+    std::array<juce::String, numAux> auxLabels;
+    std::array<juce::String, numMains> mainLabels;
     std::array<std::atomic<float>, maxChannels> stripPeaks {};
     std::array<std::atomic<float>, 2 * numMains> mainPeaks {};
     std::array<std::atomic<float>, numAux> auxPeaks {};

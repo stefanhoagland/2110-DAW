@@ -201,8 +201,13 @@ PatchView::PatchView (AudioEngine& e, std::function<String (int)> names)
     outGrid.numCols = [this] { return engine.numOutputs(); };
     outGrid.rowName = [this] (int r)
     {
-        if (r < mainRows) return "Main " + String (r / 2 + 1) + (r % 2 == 0 ? " L" : " R") + (r < 2 ? "  (master)" : "");
-        if (r < busRows) return "Aux " + String (r - mainRows + 1);
+        if (r < mainRows)
+        {
+            const auto label = engine.busLabel (true, r / 2);
+            return "Main " + String (r / 2 + 1) + (r % 2 == 0 ? " L" : " R") + (label.isNotEmpty() ? "  " + label : String())
+                   + (r < 2 ? "  (master)" : "");
+        }
+        if (r < busRows) return engine.busFullName (false, r - mainRows);
         const int t = r - busRows;
         return "Track " + String (t + 1) + " direct  " + trackName (t);
     };
@@ -258,7 +263,7 @@ void PatchView::showPage (int p)
     inView.setVisible (p == 0 && inputView == 1);
     outView.setVisible (p == 1);
     help.setText (p == 0 ? (inputView == 0 ? String() : "Pick which interface input feeds each track. Studio records and Live mixes the tracks.")
-                         : "Send the live mix or any track's input straight to interface outputs. The live mix only plays while you're live.",
+                         : "Send the mains, the auxes or any track's input straight to interface outputs.",
                   dontSendNotification);
     refresh();
 }

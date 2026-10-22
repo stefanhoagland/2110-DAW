@@ -176,6 +176,29 @@ float AudioEngine::takeMainPeak (int m, int side)
     return mainPeaks[(size_t) (jlimit (0, numMains - 1, m) * 2 + jlimit (0, 1, side))].exchange (0.0f);
 }
 
+void AudioEngine::setBusLabel (bool main, int index, const String& label)
+{
+    if (main) mainLabels[(size_t) jlimit (0, numMains - 1, index)] = label.trim();
+    else auxLabels[(size_t) jlimit (0, numAux - 1, index)] = label.trim();
+}
+
+String AudioEngine::busLabel (bool main, int index) const
+{
+    return main ? mainLabels[(size_t) jlimit (0, numMains - 1, index)] : auxLabels[(size_t) jlimit (0, numAux - 1, index)];
+}
+
+String AudioEngine::busName (bool main, int index) const
+{
+    const auto label = busLabel (main, index);
+    return label.isNotEmpty() ? label : (main ? "Main " : "Aux ") + String (index + 1);
+}
+
+String AudioEngine::busFullName (bool main, int index) const
+{
+    const auto label = busLabel (main, index);
+    return (main ? "Main " : "Aux ") + String (index + 1) + (label.isNotEmpty() ? ": " + label : String());
+}
+
 float AudioEngine::takeAuxPeak (int a)
 {
     return auxPeaks[(size_t) jlimit (0, numAux - 1, a)].exchange (0.0f);
