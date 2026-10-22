@@ -351,6 +351,7 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
 {
     auto& net = engine.network();
     // Start any announced streams that aren't being received yet.
+    StringArray started;
     for (auto& id : sources)
     {
         if (! id.startsWith ("net:")) continue;
@@ -361,11 +362,23 @@ String PatchListView::patch (const StringArray& sources, int firstTrack)
             {
                 auto err = net.subscribe (info);
                 if (err.isNotEmpty()) { message.setText (err, dontSendNotification); return err; }
+                started.addIfNotAlreadyThere (key);
             }
     }
 
     const auto status = net.status();
     const int dev = engine.numDeviceInputs();
+    // A stream started here feeds only the channels dragged, not a track for each of its
+    // channels: the extra tracks it brings are left empty, ready to patch.
+    for (auto& s : status)
+        if (started.contains (s.info.key()))
+            for (int track = 0; track < engine.numInputs(); ++track)
+            {
+                const int src = engine.getTrackSource (track);
+                if (src >= dev + s.firstChannel && src < dev + s.firstChannel + s.info.channels)
+                    engine.setTrackSource (track, -1);
+            }
+
     int t = firstTrack, placed = 0;
     for (auto& id : sources)
     {
