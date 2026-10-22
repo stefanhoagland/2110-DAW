@@ -49,6 +49,8 @@ public:
     void refreshFromEngine();  // after loading saved settings
     void tick();               // meters, ~30 times a second
     int channel() const { return index; }
+    // -1: the fader is the channel fader. 0-11: the fader sets this channel's send to that aux.
+    void setSendsOnFader (int aux);
 
     std::function<void()> onChange;
 
@@ -69,8 +71,35 @@ private:
     juce::Rectangle<int> insertArea;
     juce::Label number, name, gainLabel, gainValue, panLabel, panValue, dbValue;
     juce::Slider gain, pan, fader;
-    juce::TextButton mute { "M" }, solo { "S" };
+    juce::TextButton mute { "M" }, solo { "S" }, pre { "Pre fader" };
+    juce::OwnedArray<juce::TextButton> mains; // assign to main 1-8
+    juce::Label mainsLabel;
+    int sendsAux = -1;
     VMeter meter;
+    juce::Rectangle<int> scaleArea;
+};
+
+// A bus master strip in the Buses view: an aux (mono) or a main (stereo).
+class BusStrip : public juce::Component
+{
+public:
+    BusStrip (AudioEngine& engine, bool isMain, int index);
+    void refreshFromEngine();
+    void tick();
+    std::function<void()> onChange;
+
+    void resized() override;
+    void paint (juce::Graphics&) override;
+
+private:
+    AudioEngine::Bus& bus() const { return isMain ? engine.mainBus (index) : engine.aux (index); }
+    AudioEngine& engine;
+    bool isMain;
+    int index;
+    juce::Label name, dbValue;
+    juce::Slider fader;
+    juce::TextButton mute { "M" };
+    VMeter meterL, meterR;
     juce::Rectangle<int> scaleArea;
 };
 
@@ -84,6 +113,7 @@ public:
     void rebuild (int numChannels, const juce::StringArray& names);
     void setNames (const juce::StringArray& names);
     void refresh();  // output name, latency and button states
+    void refreshBuses(); // after the master fader moved
     void tick();
 
     // Settings as JSON text (strips, limiter, master) and back.
@@ -101,10 +131,15 @@ private:
     PluginHost& host;
     juce::TextButton goLive { "Go live" }, pluginsButton { "Plugins..." };
     juce::ToggleButton limiter { "Master limiter" };
-    juce::Label status, output, latency, hint;
+    juce::Label status, output, latency, hint, faderLabel;
+    juce::ComboBox faderMode; // what the channel faders control: main mix or an aux's sends
+    juce::TextButton channelsTab { "Channels" }, busesTab { "Buses" };
+    juce::Rectangle<int> viewPill;
+    bool showBuses = false;
     juce::OwnedArray<ChannelStrip> strips;
-    juce::Component stripHolder;
-    juce::Viewport viewport;
+    juce::OwnedArray<BusStrip> buses;
+    juce::Component stripHolder, busHolder;
+    juce::Viewport viewport, busViewport;
 };
 
 // The master section in the top bar: master fader and stereo output meter.

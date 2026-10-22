@@ -70,13 +70,13 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
     PatchView::loadOutputs (engine, settings.getValue ("patchOut"));
 
     addChildComponent (console);
-    console.onChange = [this] { saveLive(); };
+    console.onChange = [this] { master.refreshFromEngine(); saveLive(); };
     console.onGoLive = [this] (bool on)
     {
         setStatus (on ? "Live mix is going to the output" : "Live mix stopped");
     };
     addAndMakeVisible (master);
-    master.onChange = [this] { saveLive(); };
+    master.onChange = [this] { console.refreshBuses(); saveLive(); };
 
     for (auto* b : { &rtzButton, &stopButton, &playButton, &recordButton })
     {
