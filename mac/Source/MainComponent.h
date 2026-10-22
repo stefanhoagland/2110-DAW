@@ -60,7 +60,8 @@ private:
     void refreshShowButton();
     juce::File showFile;
     void showTimecodeMenu();
-    void showNetwork();
+    void showNetwork (int page); // 0 receivers, 1 transmitters
+    void refreshNetworkWindows();
     void networkChanged();
     void sendingChanged();
     juce::String autoName (int track) const;
@@ -88,7 +89,7 @@ private:
     juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" }, patchTab { "Patch" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },
                      playButton { juce::CharPointer_UTF8 ("\xe2\x96\xb6") }, recordButton { juce::CharPointer_UTF8 ("\xe2\x97\x8f") };
-    juce::TextButton showButton { "Show" }, audioButton { "Audio settings" }, timecodeButton { "Timecode: Off" }, networkButton { "AES67 network" }, folderButton { "Choose save folder" },
+    juce::TextButton showButton { "Show" }, audioButton { "Audio settings" }, timecodeButton { "Timecode: Off" }, networkButton { "Receivers" }, sendButton { "Transmitters" }, folderButton { "Choose save folder" },
                      armAll { "Arm all" }, disarmAll { "Disarm all" },
                      importButton { "Import names" }, exportButton { "Export names" },
                      zoomOut { juce::CharPointer_UTF8 ("\xe2\x88\x92") }, zoomIn { "+" };
@@ -104,7 +105,7 @@ private:
     Mode mode = studioMode;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this };
-    juce::Component::SafePointer<juce::DialogWindow> networkWindow;
+    juce::Component::SafePointer<juce::DialogWindow> networkWindow, sendWindow;
     juce::StringArray lastAuto; // each track's automatic name when last set
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

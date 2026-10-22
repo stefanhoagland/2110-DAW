@@ -18,7 +18,7 @@ static bool matchesSearch (const aes67::StreamInfo& s, const String& query)
     return true;
 }
 
-NetworkView::NetworkView (AudioEngine& e) : engine (e)
+NetworkView::NetworkView (AudioEngine& e, int page) : engine (e)
 {
     auto& net = engine.network();
     for (auto* l : { &portLabel, &latencyLabel, &streamsLabel, &hint, &error, &sdpLabel })
@@ -108,14 +108,8 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
     };
     addAndMakeVisible (reportButton);
 
-    // ---- Receive / Send tabs ----
-    for (auto* t : { &receiveTab, &sendTab })
-    {
-        WebLook::setStyle (*t, "mode");
-        addAndMakeVisible (*t);
-    }
-    receiveTab.onClick = [this] { showTab (0); };
-    sendTab.onClick = [this] { showTab (1); };
+    // ---- (no tabs: each page is its own window) ----
+    // Each page is its own window now (Receivers and Transmitters in the setup bar), so no tabs.
 
     // ---- Send ----
     for (auto* l : { &ptpState, &domainLabel, &sendLabel, &sendHint, &newLabel, &nameLabel, &chLabel, &ptimeLabel, &addrLabel, &feedLabel })
@@ -195,7 +189,7 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
     addChildComponent (sendViewport);
 
     refresh();
-    showTab (0);
+    showTab (page == 1 ? 1 : 0);
     setSize (720, 620);
     startTimer (500);
 }
@@ -203,8 +197,6 @@ NetworkView::NetworkView (AudioEngine& e) : engine (e)
 void NetworkView::showTab (int t)
 {
     tab = t;
-    receiveTab.setToggleState (t == 0, dontSendNotification);
-    sendTab.setToggleState (t == 1, dontSendNotification);
     for (Component* c : { (Component*) &latencyLabel, (Component*) &latency, (Component*) &streamsLabel, (Component*) &hint,
                           (Component*) &sdpLabel, (Component*) &search, (Component*) &viewport, (Component*) &sdpText,
                           (Component*) &addButton, (Component*) &loadButton, (Component*) &reportButton })
@@ -566,8 +558,6 @@ void NetworkView::paint (Graphics& g)
     g.fillAll (theme::panel);
     g.setColour (theme::line);
     g.drawRect ((tab == 0 ? viewport : sendViewport).getBounds().expanded (1));
-    g.setColour (theme::background);
-    g.fillRoundedRectangle (tabPill.toFloat(), 8.0f);
 }
 
 void NetworkView::Row::resized()
@@ -587,16 +577,6 @@ void NetworkView::resized()
     portLabel.setBounds (top.removeFromLeft (100));
     port.setBounds (top.removeFromLeft (260));
     top.removeFromLeft (16);
-    top.removeFromLeft (16);
-    const auto tw = [] (const String& t) { return GlyphArrangement::getStringWidthInt (FontOptions (13.0f, Font::bold), t) + 28; };
-    const int pw = tw ("Receive") + tw ("Send") + 10;
-    tabPill = top.removeFromRight (pw).withSizeKeepingCentre (pw, 32);
-    {
-        auto p = tabPill.reduced (3);
-        receiveTab.setBounds (p.removeFromLeft (tw ("Receive")));
-        p.removeFromLeft (4);
-        sendTab.setBounds (p);
-    }
     latencyLabel.setBounds (top.removeFromLeft (56));
     latency.setBounds (top.removeFromLeft (90));
     r.removeFromTop (12);
