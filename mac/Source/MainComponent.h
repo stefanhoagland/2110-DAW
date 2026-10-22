@@ -6,6 +6,7 @@
 #include "Console.h"
 #include "Patch.h"
 #include "NetworkView.h"
+#include "Usage.h"
 
 // The main window, laid out like the web version's Studio view: top bar with modes and
 // transport, a setup bar (device, save folder), a toolbar, then the tracks and timeline.
@@ -53,6 +54,7 @@ private:
     void applyAutoNames();
     void applyTimecode (const juce::String& setting, bool save);
     void updateClock (bool rec, double secs);
+    void updateUsage();
     void saveLive();
     juce::StringArray trackNames() const;
     int nextTakeNumber() const;
@@ -66,7 +68,8 @@ private:
 
     WebLook look;
     std::unique_ptr<juce::Drawable> logo;
-    juce::Label deviceInfo, folderInfo, clock, takeInfo, notice, tcInfo;
+    juce::Label deviceInfo, folderInfo, clock, takeInfo, notice, tcInfo, usageInfo;
+    AppUsage usage;
     juce::String tcSetting { "off" };
     juce::TextButton liveTab { "Live" }, studioTab { "Studio" }, soundcheckTab { "Soundcheck" }, patchTab { "Patch" };
     juce::TextButton rtzButton { juce::CharPointer_UTF8 ("\xe2\x8f\xae") }, stopButton { juce::CharPointer_UTF8 ("\xe2\x96\xa0") },

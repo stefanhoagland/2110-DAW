@@ -34,6 +34,7 @@ target_sources(DAW2110 PRIVATE
   Source/Console.cpp
   Source/Patch.cpp
   Source/PatchList.cpp
+  Source/Usage.cpp
   Source/Plugins.cpp
   Source/Names.cpp
   Source/Timecode.cpp

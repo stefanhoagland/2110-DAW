@@ -28,6 +28,12 @@ MainComponent::MainComponent (PropertiesFile& s) : settings (s)
         l->setMinimumHorizontalScale (1.0f);
         addAndMakeVisible (*l);
     }
+    usageInfo.setColour (Label::textColourId, theme::textMuted);
+    usageInfo.setFont (FontOptions (13.0f));
+    usageInfo.setJustificationType (Justification::centredRight);
+    usageInfo.setTooltip ("Audio: how much of each audio buffer's time the processing takes (near 100% means dropouts).\n"
+                          "CPU: the app's share of all your Mac's cores. Memory: what the app holds, as in Activity Monitor.");
+    addAndMakeVisible (usageInfo);
     zoomLabel.setText ("Zoom", dontSendNotification);
     zoomLabel.setJustificationType (Justification::centred);
     notice.setColour (Label::textColourId, Colour (0xffffd98a));
@@ -246,12 +252,18 @@ void MainComponent::resized()
         b.removeFromLeft (10);
         networkButton.setBounds (b.removeFromLeft (widthOf (networkButton)));
         b.removeFromLeft (10);
+        // Usage sits left of the save folder; the folder path gives way to it first.
+        const int usageW = GlyphArrangement::getStringWidthInt (FontOptions (13.0f), String (CharPointer_UTF8 ("Audio 100%  \xc2\xb7  CPU 100%  \xc2\xb7  Memory 99.9 GB"))) + 8;
+        const int folderBtnW = widthOf (folderButton);
+        const bool showUsage = b.getWidth() >= usageW + folderBtnW + 400;
+        usageInfo.setVisible (showUsage);
         const int folderW = jmin (GlyphArrangement::getStringWidthInt (FontOptions (13.0f), folderInfo.getText()) + 12,
-                                  b.getWidth() / 2);
-        folderInfo.setBounds (b.removeFromRight (folderW));
+                                  jmax (120, b.getWidth() - (showUsage ? usageW + 10 : 0) - folderBtnW - 10 - 200));
+        folderInfo.setBounds (b.removeFromRight (folderW).withSizeKeepingCentre (folderW, 18)); // one line, cut short if needed
         b.removeFromRight (10);
-        folderButton.setBounds (b.removeFromRight (widthOf (folderButton)));
+        folderButton.setBounds (b.removeFromRight (folderBtnW));
         b.removeFromRight (10);
+        if (showUsage) { usageInfo.setBounds (b.removeFromRight (usageW)); b.removeFromRight (10); }
         deviceInfo.setBounds (b);
     }
 
@@ -586,9 +598,24 @@ void MainComponent::timerCallback()
     if (++ticks % 300 == 0) plugins.save();
 
     updateClock (rec, secs);
+    if (ticks % 30 == 1) updateUsage(); // once a second
 
     // Blink the record button while recording, like the web version.
     recordButton.setAlpha (rec && (Time::getMillisecondCounter() / 500) % 2 ? 0.6f : 1.0f);
+}
+
+void MainComponent::updateUsage()
+{
+    const double audio = 100.0 * engine.devices().getCpuUsage();
+    const double cpu = usage.cpuPercent();
+    const auto mem = AppUsage::memoryBytes();
+    const String memText = mem >= (int64) 1 << 30 ? String (mem / 1073741824.0, 1) + " GB"
+                                                   : String (roundToInt (mem / 1048576.0)) + " MB";
+    usageInfo.setText ("Audio " + String (roundToInt (audio)) + "%  " + String (CharPointer_UTF8 ("\xc2\xb7")) + "  CPU " + String (roundToInt (cpu))
+                       + "%  " + String (CharPointer_UTF8 ("\xc2\xb7")) + "  Memory " + memText,
+                       dontSendNotification);
+    // Warn as the audio processing nears its deadline.
+    usageInfo.setColour (Label::textColourId, audio >= 90.0 ? theme::record : audio >= 70.0 ? theme::mute : theme::textMuted);
 }
 
 bool MainComponent::keyPressed (const KeyPress& key)
