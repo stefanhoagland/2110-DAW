@@ -246,6 +246,17 @@ int main()
     run (4);
     check (std::abs (out.getMagnitude (2, 0, block) - 0.5f * 0.5012f) < 0.01f, "aux master fader");
     engine.aux (2).faderDb = 0.0f;
+    engine.aux (2).solo = true;
+    run (4);
+    check (std::abs (out.getMagnitude (0, 0, block) - 0.5f) < 0.01f && std::abs (out.getMagnitude (1, 0, block) - 0.5f) < 0.01f,
+           "soloing aux 3 puts it on both sides of Main 1 (" + String (out.getMagnitude (0, 0, block)) + ")");
+    engine.aux (2).solo = false;
+    engine.mainBus (1).solo = true; // nothing is routed to main 2
+    run (4);
+    check (out.getMagnitude (0, 0, block) == 0.0f, "soloing an empty main 2 silences Main 1");
+    engine.mainBus (1).solo = false;
+    run (4);
+    check (out.getMagnitude (0, 0, block) > 0.3f, "Main 1 is back when nothing is soloed");
 
     engine.strip (0).toMain[2] = true;  // channel 1 also to main 3
     engine.strip (0).toMain[0] = false; // and off main 1
