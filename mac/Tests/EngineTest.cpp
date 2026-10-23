@@ -77,6 +77,8 @@ int main()
 {
     ScopedJuceInitialiser_GUI init;
     AudioEngine engine;
+    Thread::sleep (100);
+    check (engine.sampleRate() == 48000.0, "the mix runs on its own clock with no audio device");
     FakeDevice dev;
     engine.audioDeviceAboutToStart (&dev);
     check (engine.numInputs() == 64, "64 inputs seen");
@@ -144,6 +146,8 @@ int main()
     auto [l0, r0] = run (4);
     check (l0 > 0.3f && r0 > 0.3f, "the mix goes out without pressing anything (" + String (l0) + ")");
     check (engine.takeStripPeak (0) > 0.49f, "strip meter runs");
+    check (engine.takeMasterPeak (0) > 0.2f && engine.takeMainPeak (0, 0) > 0.2f,
+           "the master meter and the Main 1 strip meter both see the mix");
 
     engine.setLive (true);
     auto [l1, r1] = run (4);
