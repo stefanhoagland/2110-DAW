@@ -528,6 +528,14 @@ BusStrip::BusStrip (AudioEngine& e, bool main, int i) : engine (e), isMain (main
     mute.onClick = [this] { bus().mute = mute.getToggleState(); if (onChange) onChange(); };
     addAndMakeVisible (mute);
 
+    WebLook::setStyle (solo, "small");
+    solo.setClickingTogglesState (true);
+    solo.setColour (TextButton::buttonOnColourId, theme::solo);
+    solo.setColour (TextButton::textColourOnId, Colour (0xff111111));
+    solo.setTooltip ("Solo: hear this bus on Main 1's outputs instead of the main mix. Solo more than one to hear them together.");
+    solo.onClick = [this] { bus().solo = solo.getToggleState(); if (onChange) onChange(); };
+    addAndMakeVisible (solo);
+
     meterL.setTooltip ("Bus level after its fader. Click to reset the peak.");
     meterR.setTooltip ("Bus level after its fader. Click to reset the peak.");
     addAndMakeVisible (meterL);
@@ -546,6 +554,7 @@ void BusStrip::refreshFromEngine()
     refreshName();
     fader.setValue (bus().faderDb.load(), dontSendNotification);
     mute.setToggleState (bus().mute.load(), dontSendNotification);
+    solo.setToggleState (bus().solo.load(), dontSendNotification);
     dbValue.setText (fmtDb ((float) fader.getValue()), dontSendNotification);
 }
 
@@ -564,7 +573,10 @@ void BusStrip::resized()
     auto r = getLocalBounds().reduced (6);
     name.setBounds (r.removeFromTop (17));
     r.removeFromTop (8);
-    mute.setBounds (r.removeFromBottom (22));
+    auto buttons = r.removeFromBottom (22);
+    mute.setBounds (buttons.removeFromLeft ((buttons.getWidth() - 4) / 2));
+    buttons.removeFromLeft (4);
+    solo.setBounds (buttons);
     r.removeFromBottom (6);
     dbValue.setBounds (r.removeFromBottom (14));
     r.removeFromBottom (6);
@@ -946,6 +958,7 @@ String ConsoleView::saveState() const
         auto* o = new DynamicObject();
         o->setProperty ("fader", engine.aux (a).faderDb.load());
         o->setProperty ("mute", engine.aux (a).mute.load());
+        o->setProperty ("solo", engine.aux (a).solo.load());
         auxList.add (var (o));
     }
     for (int m = 0; m < AudioEngine::numMains; ++m)
@@ -953,6 +966,7 @@ String ConsoleView::saveState() const
         auto* o = new DynamicObject();
         o->setProperty ("fader", engine.mainBus (m).faderDb.load());
         o->setProperty ("mute", engine.mainBus (m).mute.load());
+        o->setProperty ("solo", engine.mainBus (m).solo.load());
         mainList.add (var (o));
     }
     auto* root = new DynamicObject();
@@ -1000,15 +1014,20 @@ void ConsoleView::loadState (const String& json)
         {
             engine.aux (a).faderDb = jlimit (-60.0f, 10.0f, (float) (*list)[a].getProperty ("fader", 0.0));
             engine.aux (a).mute = (bool) (*list)[a].getProperty ("mute", false);
+            engine.aux (a).solo = (bool) (*list)[a].getProperty ("solo", false);
         }
     if (auto* list = v["mainBuses"].getArray())
         for (int m = 1; m < list->size() && m < AudioEngine::numMains; ++m) // main 1's fader is "master"
         {
             engine.mainBus (m).faderDb = jlimit (-60.0f, 10.0f, (float) (*list)[m].getProperty ("fader", 0.0));
             engine.mainBus (m).mute = (bool) (*list)[m].getProperty ("mute", false);
+            engine.mainBus (m).solo = (bool) (*list)[m].getProperty ("solo", false);
         }
     if (auto* list = v["mainBuses"].getArray(); list != nullptr && list->size() > 0)
+    {
         engine.mainBus (0).mute = (bool) (*list)[0].getProperty ("mute", false);
+        engine.mainBus (0).solo = (bool) (*list)[0].getProperty ("solo", false);
+    }
     if (v.hasProperty ("limiter")) engine.setLimiter ((bool) v["limiter"]);
     if (v.hasProperty ("master")) engine.setMasterDb (jlimit (-60.0f, 10.0f, (float) v["master"]));
     limiter.setToggleState (engine.limiterEnabled(), dontSendNotification);

@@ -188,6 +188,7 @@ void AudioEngine::prepareBuffers (double rate, int deviceBlock)
     }
     bus.setSize (2 * numMains, block, false, true, false);
     auxBus.setSize (numAux, block, false, true, false);
+    soloBus.setSize (2, block, false, true, false);
     for (auto& g : lastMainGain) g.fill (0.0f);
     for (auto& g : lastSendGain) g.fill (0.0f);
     lastMainMaster.fill (0.0f);
@@ -479,6 +480,27 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         lastAuxMaster[(size_t) a] = g;
         storeMax (auxPeaks[(size_t) a], auxBus.getMagnitude (a, 0, numSamples));
     }
+    // Bus solo: Main 1 plays the soloed buses instead of its own mix.
+    bool anyBusSolo = false;
+    soloBus.clear (0, numSamples);
+    for (int m = 0; m < numMains; ++m)
+        if (mainBuses[(size_t) m].solo.load (std::memory_order_relaxed))
+        {
+            anyBusSolo = true;
+            for (int side = 0; side < 2; ++side)
+                soloBus.addFrom (side, 0, bus, m * 2 + side, 0, numSamples);
+        }
+    for (int a = 0; a < numAux; ++a)
+        if (auxBuses[(size_t) a].solo.load (std::memory_order_relaxed))
+        {
+            anyBusSolo = true;
+            for (int side = 0; side < 2; ++side)
+                soloBus.addFrom (side, 0, auxBus, a, 0, numSamples); // a mono aux in both ears
+        }
+    if (anyBusSolo)
+        for (int side = 0; side < 2; ++side)
+            bus.copyFrom (side, 0, soloBus, side, 0, numSamples);
+
     if (limiterOn.load (std::memory_order_relaxed))
     {
         constexpr float ceiling = 0.891f; // -1 dBFS

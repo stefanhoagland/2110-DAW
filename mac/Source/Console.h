@@ -118,7 +118,7 @@ private:
     int index;
     juce::Label name, dbValue;
     juce::Slider fader;
-    juce::TextButton mute { "M" };
+    juce::TextButton mute { "M" }, solo { "S" };
     VMeter meterL, meterR;
     juce::Rectangle<int> scaleArea;
 };

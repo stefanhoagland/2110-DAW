@@ -77,6 +77,9 @@ public:
     {
         std::atomic<float> faderDb { 0.0f };
         std::atomic<bool> mute { false };
+        // Solo: while any bus is soloed, Main 1 carries the soloed buses (after their faders)
+        // instead of its own mix, so you can listen to a monitor mix on the main outputs.
+        std::atomic<bool> solo { false };
     };
     Bus& aux (int a) { return auxBuses[(size_t) juce::jlimit (0, numAux - 1, a)]; }
     Bus& mainBus (int m) { return mainBuses[(size_t) juce::jlimit (0, numMains - 1, m)]; }
@@ -228,7 +231,7 @@ private:
     std::atomic<bool> liveOn { true }, limiterOn { true };
     std::atomic<int> outputCount { 0 };
     float limiterEnv = 0.0f, limiterRelease = 0.0f;
-    juce::AudioBuffer<float> work, bus, auxBus; // bus: the mains, left/right in pairs
+    juce::AudioBuffer<float> work, bus, auxBus, soloBus; // bus: the mains, left/right in pairs
 
     juce::SpinLock writersLock; // held by the audio thread while writing; by start/stop to swap
     std::vector<std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter>> writers; // by device channel
