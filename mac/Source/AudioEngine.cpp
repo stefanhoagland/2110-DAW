@@ -5,15 +5,53 @@ using namespace juce;
 
 static const String sep = String (CharPointer_UTF8 ("  \xc2\xb7  "));
 
+class AudioEngine::IdleClock : public Thread
+{
+public:
+    explicit IdleClock (AudioEngine& e) : Thread ("Soundbending Live idle clock"), engine (e) {}
+    ~IdleClock() override { stopThread (2000); }
+
+    static constexpr double rate = 48000.0;
+    static constexpr int block = 480; // 10 ms
+
+    void run() override
+    {
+        bool prepared = false;
+        double next = Time::getMillisecondCounterHiRes();
+        while (! threadShouldExit())
+        {
+            if (engine.deviceRunning.load())
+            {
+                prepared = false;
+                wait (50);
+                next = Time::getMillisecondCounterHiRes();
+                continue;
+            }
+            engine.runIdleBlock (! prepared);
+            prepared = true;
+            next += 1000.0 * block / rate;
+            const double now = Time::getMillisecondCounterHiRes();
+            if (next < now - 100.0) next = now; // fell well behind (machine asleep): don't catch up
+            if (next > now) wait (jmax (1, (int) (next - now)));
+        }
+    }
+
+private:
+    AudioEngine& engine;
+};
+
 AudioEngine::AudioEngine()
 {
     resetPatches();
     writerThread.startThread (Thread::Priority::high);
     deviceManager.addAudioCallback (this);
+    idleClock = std::make_unique<IdleClock> (*this);
+    idleClock->startThread (Thread::Priority::high);
 }
 
 AudioEngine::~AudioEngine()
 {
+    idleClock.reset();
     mtcInput.reset();
     stopRecording();
     deviceManager.removeAudioCallback (this);
@@ -109,6 +147,8 @@ float AudioEngine::takePeak (int channel)
 
 void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
 {
+    deviceRunning = true;
+    const ScopedLock sl (blockLock); // let a block on the idle clock finish first
     auto active = dev->getActiveInputChannels();
     channelToActive.fill (-1);
     int k = 0;
@@ -129,7 +169,12 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
     currentRate = dev->getCurrentSampleRate();
     ltcReset = true;
 
-    const int block = jmax (dev->getCurrentBufferSizeSamples(), 4096);
+    prepareBuffers (dev->getCurrentSampleRate(), dev->getCurrentBufferSizeSamples());
+}
+
+void AudioEngine::prepareBuffers (double rate, int deviceBlock)
+{
+    const int block = jmax (deviceBlock, 4096);
     netBuf.setSize (aes67::NetworkAudio::maxNetChannels, block, false, true, false);
     netOutBuf.setSize (aes67::NetworkSend::maxChannels, block, false, true, false);
     work.setSize (1, block, false, true, false);
@@ -149,7 +194,25 @@ void AudioEngine::audioDeviceAboutToStart (AudioIODevice* dev)
     lastAuxMaster.fill (0.0f);
     limiterEnv = 0.0f;
     // About 100 ms release, like the web version's limiter.
-    limiterRelease = (float) std::exp (-1.0 / (0.1 * jmax (1.0, dev->getCurrentSampleRate())));
+    limiterRelease = (float) std::exp (-1.0 / (0.1 * jmax (1.0, rate)));
+}
+
+void AudioEngine::runIdleBlock (bool prepareFirst)
+{
+    const ScopedLock sl (blockLock);
+    if (deviceRunning.load())
+        return;
+    if (prepareFirst)
+    {
+        // No device inputs or outputs. The input count stays as it was, so network
+        // channels keep their track numbers.
+        channelToActive.fill (-1);
+        outChannelToActive.fill (-1);
+        currentRate = IdleClock::rate;
+        ltcReset = true;
+        prepareBuffers (IdleClock::rate, IdleClock::block);
+    }
+    audioDeviceIOCallbackWithContext (nullptr, 0, nullptr, 0, IdleClock::block, {});
 }
 
 double AudioEngine::outputLatencyMs() const
@@ -169,7 +232,7 @@ float AudioEngine::takeStripPeak (int channel)
 
 float AudioEngine::takeMasterPeak (int side)
 {
-    return takeMainPeak (0, side);
+    return masterPeaks[(size_t) jlimit (0, 1, side)].exchange (0.0f);
 }
 
 float AudioEngine::takeMainPeak (int m, int side)
@@ -215,6 +278,7 @@ AudioEngine::Strip::Strip()
 void AudioEngine::audioDeviceStopped()
 {
     currentRate = 0.0;
+    deviceRunning = false; // the idle clock takes over
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, int numIns,
@@ -437,7 +501,11 @@ void AudioEngine::mixLive (int tracks, float* const* outputs, int numOuts, int n
         limiterEnv = 0.0f; // start fresh when it's switched back on
     }
     for (int c = 0; c < 2 * numMains; ++c)
-        storeMax (mainPeaks[(size_t) c], bus.getMagnitude (c, 0, numSamples));
+    {
+        const float p = bus.getMagnitude (c, 0, numSamples);
+        storeMax (mainPeaks[(size_t) c], p);
+        if (c < 2) storeMax (masterPeaks[(size_t) c], p);
+    }
 
     // Output patch. The mix goes out unless muted (only when the app closes); direct track signals always do.
     const bool live = liveOn.load (std::memory_order_relaxed);

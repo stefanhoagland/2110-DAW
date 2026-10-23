@@ -202,6 +202,15 @@ private:
     juce::AudioBuffer<float> netOutBuf; // sending channels for this block
     std::atomic<double> currentRate { 0.0 };
 
+    // With no audio device running, this clock runs the mix instead (48 kHz, 10 ms
+    // blocks), so network inputs still meter, record and get sent.
+    class IdleClock;
+    std::unique_ptr<IdleClock> idleClock;
+    std::atomic<bool> deviceRunning { false };
+    juce::CriticalSection blockLock; // held by the idle clock while it runs a block
+    void prepareBuffers (double rate, int block);
+    void runIdleBlock (bool prepareFirst);
+
     std::array<Strip, maxChannels> strips;
     std::array<Bus, numAux> auxBuses;
     std::array<Bus, numMains> mainBuses;
@@ -209,6 +218,7 @@ private:
     std::array<juce::String, numMains> mainLabels;
     std::array<std::atomic<float>, maxChannels> stripPeaks {};
     std::array<std::atomic<float>, 2 * numMains> mainPeaks {};
+    std::array<std::atomic<float>, 2> masterPeaks {}; // main 1 again, for the top-bar meter, so it and the Main 1 strip don't take each other's peaks
     std::array<std::atomic<float>, numAux> auxPeaks {};
     // Gains used last block, for smooth changes.
     std::array<std::array<float, 2 * numMains>, numTracks> lastMainGain {};
