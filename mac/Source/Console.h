@@ -186,11 +186,12 @@ private:
 };
 
 // The master section in the top bar: master fader and stereo output meter.
-class MasterStrip : public juce::Component
+class MasterStrip : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit MasterStrip (AudioEngine& engine);
     void tick();
+    void mouseDown (const juce::MouseEvent&) override; // clears the clip lights and peak hold, like the other meters
     void refreshFromEngine();
     std::function<void()> onChange;
 

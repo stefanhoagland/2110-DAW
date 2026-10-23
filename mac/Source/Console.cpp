@@ -1057,7 +1057,14 @@ MasterStrip::MasterStrip (AudioEngine& e) : engine (e)
     fader.setMouseCursor (MouseCursor::LeftRightResizeCursor);
     fader.onValueChange = [this] { engine.setMasterDb ((float) fader.getValue()); if (onChange) onChange(); };
     addAndMakeVisible (fader);
+    setTooltip ("Click (or double-click) the meter to reset the red clip light and peak hold.");
     refreshFromEngine();
+}
+
+void MasterStrip::mouseDown (const MouseEvent&)
+{
+    for (int s = 0; s < 2; ++s) { clip[s] = false; hold[s] = 0.0f; holdFrames[s] = 0; }
+    repaint();
 }
 
 void MasterStrip::refreshFromEngine()
