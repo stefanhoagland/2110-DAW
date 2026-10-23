@@ -141,17 +141,23 @@ void SendKnob::paint (Graphics& g)
     const bool on = v > -60.0;
     const float pos = (float) ((v + 60.0) / 70.0);
     const float rad = size * 0.5f - 2.0f;
+    const auto centre = k.getCentre();
+    if (on) // a live send gets a green face, like a lit Mains button
+    {
+        g.setColour (theme::auxBus.withAlpha (preFader ? 0.32f : 0.2f));
+        g.fillEllipse (k.reduced (2.0f));
+    }
     Path track, value;
-    track.addCentredArc (k.getCentreX(), k.getCentreY(), rad, rad, 0.0f, start, end, true);
-    g.setColour (theme::textMuted.withAlpha (0.3f));
+    track.addCentredArc (centre.x, centre.y, rad, rad, 0.0f, start, end, true);
+    g.setColour (theme::auxBus.withAlpha (on ? 0.45f : 0.35f));
     g.strokePath (track, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
     if (on)
     {
-        value.addCentredArc (k.getCentreX(), k.getCentreY(), rad, rad, 0.0f, start, start + pos * (end - start), true);
-        g.setColour (preFader ? theme::auxBus : theme::auxBus.darker (0.35f));
-        g.strokePath (value, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
+        value.addCentredArc (centre.x, centre.y, rad, rad, 0.0f, start, start + pos * (end - start), true);
+        g.setColour (preFader ? theme::auxBus : theme::auxBus.darker (0.25f));
+        g.strokePath (value, PathStrokeType (3.0f, PathStrokeType::curved, PathStrokeType::rounded));
     }
-    g.setColour (on ? theme::text : theme::textMuted);
+    g.setColour (on ? Colours::white : theme::auxBus.withAlpha (0.8f));
     g.setFont (FontOptions (10.0f, Font::bold));
     g.drawText (auxNumber, k, Justification::centred);
     if (! preFader) // post-fader sends are the exception, so only they are marked
